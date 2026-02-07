@@ -12,10 +12,12 @@
 Current command tree:
 
 - `canvasctl config set-base-url <url>`
+- `canvasctl config set-download-path <path>`
+- `canvasctl config clear-download-path`
 - `canvasctl config show`
 - `canvasctl courses list [--all] [--json] [--base-url <url>]`
-- `canvasctl download run --course <id-or-code>... [--source <source>...] [--dest <path>] [--overwrite <bool>] [--force] [--concurrency <n>] [--base-url <url>]`
-- `canvasctl download interactive [--dest <path>] [--base-url <url>] [--concurrency <n>] [--force]`
+- `canvasctl download run --course <id-or-code>... [--source <source>...] [--dest <path>] [--export-dest] [--overwrite <bool>] [--force] [--concurrency <n>] [--base-url <url>]`
+- `canvasctl download interactive [--dest <path>] [--export-dest] [--base-url <url>] [--concurrency <n>] [--force]`
 - `canvasctl download resume --manifest <path>`
 
 Available values for `--source`:
@@ -30,6 +32,10 @@ Notes:
 
 - `--course` is required for `download run` and can be repeated.
 - `--source` defaults to all source types when omitted.
+- When no destination is configured, downloads default to `./downloads`.
+- `--dest` sets destination for the current command only.
+- `--export-dest` requires `--dest` and saves that path as future default.
+- `canvasctl config show` displays both `default_dest` (saved value) and `effective_dest` (active path).
 - `--overwrite` defaults to false (`--force` is equivalent to overwrite true).
 - `--concurrency` defaults to configured `default_concurrency` (12) when omitted.
 - `--manifest` is required for `download resume`.
@@ -113,6 +119,26 @@ Default behavior skips existing files. To overwrite existing filenames, use:
 
 ```bash
 canvasctl download run --course 12345 --overwrite true
+```
+
+Use a one-off destination:
+
+```bash
+canvasctl download run --course 12345 --dest ~/Downloads/canvas-course-files
+```
+
+Persist that destination for future commands:
+
+```bash
+canvasctl download run --course 12345 --dest ~/Downloads/canvas-course-files --export-dest
+```
+
+Or set/clear it directly in config:
+
+```bash
+canvasctl config set-download-path ~/Downloads/canvas-course-files
+canvasctl config show
+canvasctl config clear-download-path
 ```
 
 The CLI reads `CANVAS_TOKEN` if set; otherwise it prompts securely for a token.
