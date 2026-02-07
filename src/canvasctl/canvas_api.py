@@ -211,8 +211,16 @@ class CanvasClient:
         results: list[Any] = []
         next_url: str | None = path
         next_params = dict(params or {})
+        seen_targets: set[str] = set()
 
         while next_url:
+            current_target = self._normalize_request_target(next_url)
+            if current_target in seen_targets:
+                raise CanvasApiError(
+                    f"Pagination loop detected for {path}: repeated next link {next_url!r}"
+                )
+            seen_targets.add(current_target)
+
             response = self._request("GET", next_url, params=next_params)
             payload = response.json()
             if isinstance(payload, list):
