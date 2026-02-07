@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from canvasctl.canvas_api import CourseSummary
@@ -86,3 +88,79 @@ def test_download_run_force_conflicts_with_overwrite_false(monkeypatch):
 
     assert result.exit_code != 0
     assert "Conflicting options" in result.output
+
+
+def test_download_run_uses_dest_override(monkeypatch, tmp_path):
+    runner = CliRunner()
+    capture: dict[str, object] = {}
+    _setup_common(monkeypatch, capture)
+
+    destination = tmp_path / "custom-downloads"
+    result = runner.invoke(
+        app,
+        ["download", "run", "--course", "1631791", "--dest", str(destination)],
+    )
+
+    assert result.exit_code == 0
+    assert capture["dest_root"] == destination.resolve()
+
+
+def test_download_run_export_dest_requires_dest(monkeypatch):
+    runner = CliRunner()
+    capture: dict[str, object] = {}
+    _setup_common(monkeypatch, capture)
+
+    result = runner.invoke(
+        app,
+        ["download", "run", "--course", "1631791", "--export-dest"],
+    )
+
+    assert result.exit_code != 0
+    assert "--export-dest requires --dest" in result.output
+
+
+def test_download_run_export_dest_persists_destination(monkeypatch, tmp_path):
+    runner = CliRunner()
+    capture: dict[str, object] = {}
+    _setup_common(monkeypatch, capture)
+
+    saved: dict[str, Path] = {}
+
+    def fake_set_default_destination(path: Path) -> AppConfig:
+        saved["path"] = path
+        return AppConfig(
+            base_url="https://canvas.test",
+            default_dest=str(path),
+            default_concurrency=12,
+        )
+
+    monkeypatch.setattr("canvasctl.cli.set_default_destination", fake_set_default_destination)
+
+    destination = tmp_path / "persisted-downloads"
+    result = runner.invoke(
+        app,
+        [
+            "download",
+            "run",
+            "--course",
+            "1631791",
+            "--dest",
+            str(destination),
+            "--export-dest",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert saved["path"] == destination.resolve()
+    assert "Saved default download path" in result.output
+
+
+def test_download_interactive_export_dest_requires_dest(monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("canvasctl.cli._load_config_or_fail", lambda: AppConfig(base_url="https://canvas.test"))
+    monkeypatch.setattr("canvasctl.cli._resolve_base_url_or_fail", lambda _cfg, _override: "https://canvas.test")
+
+    result = runner.invoke(app, ["download", "interactive", "--export-dest"])
+
+    assert result.exit_code != 0
+    assert "--export-dest requires --dest" in result.output
