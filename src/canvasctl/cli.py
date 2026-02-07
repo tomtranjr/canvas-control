@@ -19,7 +19,16 @@ from canvasctl.canvas_api import (
     CourseSummary,
     RemoteFile,
 )
-from canvasctl.config import AppConfig, ConfigError, DEFAULT_CONCURRENCY, load_config, resolve_base_url, set_base_url
+from canvasctl.config import (
+    AppConfig,
+    ConfigError,
+    DEFAULT_CONCURRENCY,
+    clear_default_destination,
+    load_config,
+    resolve_base_url,
+    set_base_url,
+    set_default_destination,
+)
 from canvasctl.courses import course_to_dict, render_courses_table, sort_courses
 from canvasctl.downloader import (
     DownloadTask,
@@ -157,6 +166,23 @@ def _resolve_overwrite(overwrite: str | None, force: bool) -> bool:
     return parsed or force
 
 
+def _persist_destination_if_requested(
+    *,
+    export_dest: bool,
+    provided_dest: Path | None,
+    resolved_dest: Path,
+) -> None:
+    if not export_dest:
+        return
+    if provided_dest is None:
+        _fail("--export-dest requires --dest <path>.")
+    try:
+        cfg = set_default_destination(resolved_dest)
+    except ConfigError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Saved default download path:[/green] {cfg.default_dest}")
+
+
 def _resolve_courses_from_selectors(
     courses: Sequence[CourseSummary],
     selectors: Sequence[str],
@@ -203,6 +229,7 @@ def _render_config_table(cfg: AppConfig) -> Table:
     table.add_column("Value")
     table.add_row("base_url", cfg.base_url or "")
     table.add_row("default_dest", cfg.default_dest or "")
+    table.add_row("effective_dest", str(_resolve_destination(None, cfg)))
     table.add_row("default_concurrency", str(cfg.default_concurrency))
     return table
 
@@ -393,6 +420,28 @@ def config_set_base_url(url: str) -> None:
     console.print(f"[green]Saved base_url:[/green] {cfg.base_url}")
 
 
+@config_app.command("set-download-path")
+def config_set_download_path(path: Path) -> None:
+    """Persist the default download destination."""
+    try:
+        cfg = set_default_destination(path)
+    except ConfigError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Saved default download path:[/green] {cfg.default_dest}")
+
+
+@config_app.command("clear-download-path")
+def config_clear_download_path() -> None:
+    """Remove the persisted default download destination."""
+    try:
+        cfg = clear_default_destination()
+    except ConfigError as exc:
+        _fail(str(exc))
+    effective = _resolve_destination(None, cfg)
+    console.print("[green]Cleared default download path.[/green]")
+    console.print(f"[green]Effective download path:[/green] {effective}")
+
+
 @config_app.command("show")
 def config_show() -> None:
     """Show effective local config."""
@@ -437,6 +486,11 @@ def download_run(
         help=f"Source type(s): {', '.join(ALL_SOURCES)}. Defaults to all.",
     ),
     dest: Path | None = typer.Option(None, "--dest", help="Destination root directory."),
+    export_dest: bool = typer.Option(
+        False,
+        "--export-dest",
+        help="Persist --dest as the default download path for future commands.",
+    ),
     overwrite: str | None = typer.Option(
         None,
         "--overwrite",
@@ -454,6 +508,11 @@ def download_run(
     cfg = _load_config_or_fail()
     resolved_base_url = _resolve_base_url_or_fail(cfg, base_url)
     destination = _resolve_destination(dest, cfg)
+    _persist_destination_if_requested(
+        export_dest=export_dest,
+        provided_dest=dest,
+        resolved_dest=destination,
+    )
     resolved_concurrency = _resolve_concurrency(concurrency, cfg)
     resolved_overwrite = _resolve_overwrite(overwrite, force)
 
@@ -483,6 +542,11 @@ def download_run(
 @download_app.command("interactive")
 def download_interactive(
     dest: Path | None = typer.Option(None, "--dest", help="Destination root directory."),
+    export_dest: bool = typer.Option(
+        False,
+        "--export-dest",
+        help="Persist --dest as the default download path for future commands.",
+    ),
     base_url: str | None = typer.Option(None, "--base-url", help="Canvas instance URL override."),
     concurrency: int | None = typer.Option(
         None,
@@ -495,6 +559,11 @@ def download_interactive(
     cfg = _load_config_or_fail()
     resolved_base_url = _resolve_base_url_or_fail(cfg, base_url)
     destination = _resolve_destination(dest, cfg)
+    _persist_destination_if_requested(
+        export_dest=export_dest,
+        provided_dest=dest,
+        resolved_dest=destination,
+    )
     resolved_concurrency = _resolve_concurrency(concurrency, cfg)
 
     def action(client: CanvasClient) -> int:
