@@ -50,6 +50,22 @@ def validate_base_url(url: str) -> str:
     return normalized
 
 
+def normalize_destination_path(path: str | Path) -> str:
+    if isinstance(path, Path):
+        path_obj = path
+    elif isinstance(path, str):
+        if not path.strip():
+            raise ConfigError("Download path cannot be empty.")
+        path_obj = Path(path)
+    else:
+        raise ConfigError("Download path must be a string or path.")
+
+    try:
+        return str(path_obj.expanduser().resolve())
+    except OSError as exc:
+        raise ConfigError(f"Invalid download path {path_obj!s}: {exc}") from exc
+
+
 def _read_raw_config() -> dict[str, Any]:
     path = config_path()
     if not path.exists():
@@ -71,8 +87,11 @@ def load_config() -> AppConfig:
             raise ConfigError("Config key 'base_url' must be a string.")
         base_url = validate_base_url(base_url)
 
-    if default_dest is not None and not isinstance(default_dest, str):
-        raise ConfigError("Config key 'default_dest' must be a string.")
+    if default_dest is not None:
+        if not isinstance(default_dest, str):
+            raise ConfigError("Config key 'default_dest' must be a string.")
+        if not default_dest.strip():
+            raise ConfigError("Config key 'default_dest' must not be empty.")
 
     if not isinstance(default_concurrency, int) or default_concurrency <= 0:
         raise ConfigError("Config key 'default_concurrency' must be a positive integer.")
@@ -99,6 +118,20 @@ def save_config(config: AppConfig) -> None:
 def set_base_url(url: str) -> AppConfig:
     cfg = load_config()
     cfg.base_url = validate_base_url(url)
+    save_config(cfg)
+    return cfg
+
+
+def set_default_destination(path: str | Path) -> AppConfig:
+    cfg = load_config()
+    cfg.default_dest = normalize_destination_path(path)
+    save_config(cfg)
+    return cfg
+
+
+def clear_default_destination() -> AppConfig:
+    cfg = load_config()
+    cfg.default_dest = None
     save_config(cfg)
     return cfg
 
