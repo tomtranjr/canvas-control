@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 import respx
 
 from canvasctl.canvas_api import CanvasClient
@@ -14,10 +15,10 @@ def test_get_paginated_follows_next_link(monkeypatch):
             200,
             json=[{"id": 1}],
             headers={
-                "Link": '<https://canvas.test/api/v1/courses?page=2>; rel="next"'
+                "Link": '<https://canvas.test/api/v1/courses-page-2>; rel="next"'
             },
         )
-        router.get("https://canvas.test/api/v1/courses?page=2").respond(
+        router.get("https://canvas.test/api/v1/courses-page-2").respond(
             200,
             json=[{"id": 2}],
         )
@@ -47,3 +48,20 @@ def test_retry_on_429(monkeypatch):
 
     assert payload == []
     assert call_count["value"] == 2
+
+
+def test_get_paginated_detects_loop(monkeypatch):
+    monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://canvas.test/api/v1/courses").respond(
+            200,
+            json=[{"id": 1}],
+            headers={
+                "Link": '<https://canvas.test/api/v1/courses>; rel="next"'
+            },
+        )
+
+        with CanvasClient("https://canvas.test", "token") as client:
+            with pytest.raises(RuntimeError, match="Pagination loop detected"):
+                client.get_paginated("/courses")
