@@ -1,6 +1,6 @@
-# canvasctl
+# canvas-control
 
-`canvasctl` turns Canvas into a fast, scriptable download pipeline.
+`canvas-control` turns Canvas into a fast, scriptable download pipeline.
 
 Instead of clicking through files one-by-one, you can:
 
@@ -9,7 +9,7 @@ Instead of clicking through files one-by-one, you can:
 - use interactive prompts when you want guidance
 - generate manifests so failed downloads can be resumed
 
-## Why canvasctl is powerful
+## Why canvas-control is powerful
 
 - One command can download from `files`, `assignments`, `discussions`, `pages`, and `modules`.
 - It is built for repeatable workflows: predictable output paths and machine-readable manifests.
@@ -18,7 +18,7 @@ Instead of clicking through files one-by-one, you can:
 
 ## Quick start
 
-`canvasctl` uses [uv](https://docs.astral.sh/uv/) for environment and dependency management.
+`canvas-control` uses [uv](https://docs.astral.sh/uv/) for environment and dependency management.
 
 1. Create and activate a virtual environment (Python 3.12+):
 
@@ -36,15 +36,15 @@ uv pip install -e '.[dev]'
 3. Set your Canvas base URL once:
 
 ```bash
-canvasctl config set-base-url https://your-school.instructure.com
+cvsctl config set-base-url https://your-school.instructure.com
 ```
 
-4. Set `CANVAS_TOKEN` (recommended) or let `canvasctl` prompt for it.
+4. Set `CANVAS_TOKEN` (recommended) or let `cvsctl` prompt for it.
 
 5. Run your first command:
 
 ```bash
-canvasctl courses list
+cvsctl courses list
 ```
 
 ## Set `CANVAS_TOKEN`
@@ -73,31 +73,31 @@ Tips so you do not copy/paste every time:
 List courses, then download one by ID:
 
 ```bash
-canvasctl courses list
-canvasctl download run --course 12345
+cvsctl courses list
+cvsctl download run --course 12345
 ```
 
 Download two courses in one command:
 
 ```bash
-canvasctl download run --course 12345 --course 67890
+cvsctl download run --course 12345 --course 67890
 ```
 
 Limit sources to just files + assignments:
 
 ```bash
-canvasctl download run --course 12345 --source files --source assignments
+cvsctl download run --course 12345 --source files --source assignments
 ```
 
 Overwrite existing files:
 
 ```bash
-canvasctl download run --course 12345 --overwrite true
+cvsctl download run --course 12345 --overwrite true
 ```
 
 ## Configuration deep-dive
 
-`canvasctl` has two destination concepts:
+`canvas-control` has two destination concepts:
 
 - `default_dest`: saved path in config
 - `effective_dest`: active path for this run
@@ -107,31 +107,31 @@ If no destination is configured, downloads default to `./downloads`.
 Show current config:
 
 ```bash
-canvasctl config show
+cvsctl config show
 ```
 
 Set a persistent default download location:
 
 ```bash
-canvasctl config set-download-path ~/Downloads/canvas-files
+cvsctl config set-download-path ~/Downloads/canvas-files
 ```
 
 Clear the persistent default:
 
 ```bash
-canvasctl config clear-download-path
+cvsctl config clear-download-path
 ```
 
 Use a one-off destination without saving it:
 
 ```bash
-canvasctl download run --course 12345 --dest ~/Desktop/tmp-canvas
+cvsctl download run --course 12345 --dest ~/Desktop/tmp-canvas
 ```
 
 Use and save a destination in one step:
 
 ```bash
-canvasctl download run --course 12345 --dest ~/Downloads/canvas-files --export-dest
+cvsctl download run --course 12345 --dest ~/Downloads/canvas-files --export-dest
 ```
 
 ## Interactive mode
@@ -139,13 +139,13 @@ canvasctl download run --course 12345 --dest ~/Downloads/canvas-files --export-d
 If you want a guided flow (choose courses, sources, and possibly file-level selection), use:
 
 ```bash
-canvasctl download interactive
+cvsctl download interactive
 ```
 
 You can still provide overrides:
 
 ```bash
-canvasctl download interactive --dest ~/Downloads/canvas-files --export-dest --concurrency 16
+cvsctl download interactive --dest ~/Downloads/canvas-files --export-dest --concurrency 16
 ```
 
 ## Resume failed downloads
@@ -153,7 +153,7 @@ canvasctl download interactive --dest ~/Downloads/canvas-files --export-dest --c
 Every run writes manifest files. To retry anything marked `failed` or `pending`:
 
 ```bash
-canvasctl download resume --manifest /path/to/.canvasctl-runs/<run-id>.json
+cvsctl download resume --manifest /path/to/.canvasctl-runs/<run-id>.json
 ```
 
 This is ideal for flaky networks or large course downloads.
@@ -162,14 +162,14 @@ This is ideal for flaky networks or large course downloads.
 
 Current command tree:
 
-- `canvasctl config set-base-url <url>`
-- `canvasctl config set-download-path <path>`
-- `canvasctl config clear-download-path`
-- `canvasctl config show`
-- `canvasctl courses list [--all] [--json] [--base-url <url>]`
-- `canvasctl download run --course <id-or-code>... [--source <source>...] [--dest <path>] [--export-dest] [--overwrite <bool>] [--force] [--concurrency <n>] [--base-url <url>]`
-- `canvasctl download interactive [--dest <path>] [--export-dest] [--base-url <url>] [--concurrency <n>] [--force]`
-- `canvasctl download resume --manifest <path>`
+- `cvsctl config set-base-url <url>`
+- `cvsctl config set-download-path <path>`
+- `cvsctl config clear-download-path`
+- `cvsctl config show`
+- `cvsctl courses list [--all] [--json] [--base-url <url>]`
+- `cvsctl download run --course <id-or-code>... [--source <source>...] [--dest <path>] [--export-dest] [--overwrite <bool>] [--force] [--concurrency <n>] [--base-url <url>]`
+- `cvsctl download interactive [--dest <path>] [--export-dest] [--base-url <url>] [--concurrency <n>] [--force]`
+- `cvsctl download resume --manifest <path>`
 
 Available `--source` values:
 
@@ -196,16 +196,16 @@ Behavior notes:
 401 / token rejected:
 
 - update `CANVAS_TOKEN` and retry
-- or unset it and let `canvasctl` prompt you again
+- or unset it and let `cvsctl` prompt you again
 
 No base URL configured:
 
-- run `canvasctl config set-base-url https://your-school.instructure.com`
+- run `cvsctl config set-base-url https://your-school.instructure.com`
 
 No files downloaded:
 
 - check source filters (`--source`)
-- run `canvasctl courses list --all` to verify course visibility/state
+- run `cvsctl courses list --all` to verify course visibility/state
 - use `download interactive` to inspect course/file selections
 
 ## Contributing
