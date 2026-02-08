@@ -47,6 +47,31 @@ class RemoteFile:
     source_ref: str
 
 
+@dataclass(slots=True)
+class CourseGrade:
+    """Overall grade for a single course enrollment."""
+
+    course_id: int
+    course_code: str
+    course_name: str
+    current_score: float | None
+    current_grade: str | None
+
+
+@dataclass(slots=True)
+class AssignmentGrade:
+    """Per-assignment grade with submission data."""
+
+    assignment_id: int
+    assignment_name: str
+    course_id: int
+    points_possible: float | None
+    score: float | None
+    grade: str | None
+    submitted_at: str | None
+    workflow_state: str | None
+
+
 class CanvasClient:
     def __init__(
         self,
@@ -259,6 +284,65 @@ class CanvasClient:
                 )
             )
         return courses
+
+    def list_courses_with_grades(self, *, include_all: bool = False) -> list[CourseGrade]:
+        params: dict[str, Any] = {
+            "per_page": 100,
+            "include[]": ["term", "total_scores"],
+        }
+        if not include_all:
+            params["enrollment_state"] = "active"
+
+        raw_courses = self.get_paginated("/courses", params=params)
+        grades: list[CourseGrade] = []
+        for item in raw_courses:
+            enrollments = item.get("enrollments") or []
+            student_enrollment: dict[str, Any] | None = None
+            for enrollment in enrollments:
+                if enrollment.get("type") == "student":
+                    student_enrollment = enrollment
+                    break
+
+            grades.append(
+                CourseGrade(
+                    course_id=int(item["id"]),
+                    course_code=item.get("course_code") or "",
+                    course_name=item.get("name") or "",
+                    current_score=(
+                        student_enrollment.get("computed_current_score")
+                        if student_enrollment
+                        else None
+                    ),
+                    current_grade=(
+                        student_enrollment.get("computed_current_grade")
+                        if student_enrollment
+                        else None
+                    ),
+                )
+            )
+        return grades
+
+    def list_assignment_grades(self, course_id: int) -> list[AssignmentGrade]:
+        raw = self.get_paginated(
+            f"/courses/{course_id}/assignments",
+            params={"per_page": 100, "include[]": ["submission"]},
+        )
+        grades: list[AssignmentGrade] = []
+        for item in raw:
+            submission = item.get("submission") or {}
+            grades.append(
+                AssignmentGrade(
+                    assignment_id=int(item["id"]),
+                    assignment_name=item.get("name") or "",
+                    course_id=course_id,
+                    points_possible=item.get("points_possible"),
+                    score=submission.get("score"),
+                    grade=submission.get("grade"),
+                    submitted_at=submission.get("submitted_at"),
+                    workflow_state=submission.get("workflow_state"),
+                )
+            )
+        return grades
 
     def list_course_files(self, course_id: int) -> list[dict[str, Any]]:
         return self.get_paginated(f"/courses/{course_id}/files", params={"per_page": 100})
