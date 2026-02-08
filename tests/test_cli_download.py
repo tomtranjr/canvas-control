@@ -164,3 +164,39 @@ def test_download_interactive_export_dest_requires_dest(monkeypatch):
 
     assert result.exit_code != 0
     assert "--export-dest requires --dest" in result.output
+
+
+def test_download_interactive_handles_prompt_errors_without_traceback(monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("canvasctl.cli._load_config_or_fail", lambda: AppConfig(base_url="https://canvas.test"))
+    monkeypatch.setattr("canvasctl.cli._resolve_base_url_or_fail", lambda _cfg, _override: "https://canvas.test")
+
+    class InteractiveClient:
+        def list_courses(self, *, include_all: bool):
+            assert include_all is False
+            return [
+                CourseSummary(
+                    id=1631791,
+                    course_code="MSDS-697-01",
+                    name="Distributed Data Systems",
+                    workflow_state="available",
+                    term_name="Spring 2026",
+                    start_at=None,
+                    end_at=None,
+                )
+            ]
+
+    monkeypatch.setattr(
+        "canvasctl.cli._run_with_client",
+        lambda _base_url, action: action(InteractiveClient()),
+    )
+    monkeypatch.setattr(
+        "canvasctl.cli.prompt_interactive_selection",
+        lambda _courses: (_ for _ in ()).throw(RuntimeError("No courses selected.")),
+    )
+
+    result = runner.invoke(app, ["download", "interactive"])
+
+    assert result.exit_code == 1
+    assert "No courses selected." in result.output
+    assert "Traceback" not in result.output
