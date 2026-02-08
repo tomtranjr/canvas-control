@@ -572,7 +572,10 @@ def download_interactive(
             console.print("[yellow]No active courses available.[/yellow]")
             return 0
 
-        selection = prompt_interactive_selection(all_courses)
+        try:
+            selection = prompt_interactive_selection(all_courses)
+        except RuntimeError as exc:
+            _fail(str(exc))
         selected_map = {course.id: course for course in all_courses}
         selected_courses = [
             selected_map[course_id]
