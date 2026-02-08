@@ -16,66 +16,57 @@ Instead of clicking through files one-by-one, you can:
 - It works for both beginners and power users: guided mode (`download interactive`) and fully scripted mode (`download run`).
 - It handles real-world interruptions: failed/pending items can be resumed from a manifest.
 
-## 5-minute quick start (uv + Python 3.12+)
+## Quick start
 
-1. Install `uv`.
+`canvasctl` uses [uv](https://docs.astral.sh/uv/) for environment and dependency management.
 
-macOS (Homebrew):
-
-```bash
-brew install uv
-```
-
-Linux/macOS (official installer):
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Windows (PowerShell):
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-2. Install Python 3.12 (if needed).
-
-```bash
-uv python install 3.12
-```
-
-3. Create and activate a virtual environment in this repo.
+1. Create and activate a virtual environment (Python 3.12+):
 
 ```bash
 uv venv --python 3.12
 source .venv/bin/activate
 ```
 
-Windows PowerShell activation:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-4. Install the project and dev dependencies.
+2. Install the project and dev dependencies:
 
 ```bash
 uv pip install -e '.[dev]'
 ```
 
-5. Set your Canvas URL once.
+3. Set your Canvas base URL once:
 
 ```bash
 canvasctl config set-base-url https://your-school.instructure.com
 ```
 
-6. Run your first command.
+4. Set `CANVAS_TOKEN` (recommended) or let `canvasctl` prompt for it.
+
+5. Run your first command:
 
 ```bash
 canvasctl courses list
 ```
 
-`canvasctl` reads `CANVAS_TOKEN` automatically if you set it. If not set, it securely prompts.
+## Set `CANVAS_TOKEN`
+
+Create a token in Canvas:
+
+1. Log in to Canvas.
+2. Go to `Account` -> `Settings`.
+3. Under approved integrations / access tokens, create a **New Access Token**.
+4. Copy the token value.
+
+Set it in your shell:
+
+```bash
+export CANVAS_TOKEN="your-token"
+```
+
+Tips so you do not copy/paste every time:
+
+- Add the export to your shell profile (`~/.zshrc` or `~/.bashrc`) and restart your shell.
+- If you use `direnv`, put `export CANVAS_TOKEN="..."` in a project `.envrc` and run `direnv allow`.
+- If a token rotates, update the saved value once in your profile (or `.envrc`).
 
 ## First real workflow
 
