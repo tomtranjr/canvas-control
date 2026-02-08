@@ -6,6 +6,8 @@ Instead of clicking through files one-by-one, you can:
 
 - list your courses in seconds
 - pull files from multiple Canvas content sources in one run
+- check your grades across all courses at a glance
+- export grade reports to CSV or JSON
 - use interactive prompts when you want guidance
 - generate manifests so failed downloads can be resumed
 
@@ -15,6 +17,7 @@ Instead of clicking through files one-by-one, you can:
 - It is built for repeatable workflows: predictable output paths and machine-readable manifests.
 - It works for both beginners and power users: guided mode (`download interactive`) and fully scripted mode (`download run`).
 - It handles real-world interruptions: failed/pending items can be resumed from a manifest.
+- Grades are accessible from the terminal: view summaries, per-assignment breakdowns, or export to CSV/JSON.
 
 ## Quick start
 
@@ -95,6 +98,86 @@ Overwrite existing files:
 cvsctl download run --course 12345 --overwrite true
 ```
 
+## Viewing grades
+
+Check your current grades across all active courses:
+
+```bash
+canvasctl grades summary
+```
+
+This prints a table with course name, letter grade, and percentage for each course.
+
+Include concluded/past courses:
+
+```bash
+canvasctl grades summary --all
+```
+
+See a per-assignment breakdown (scores, possible points, status):
+
+```bash
+canvasctl grades summary --detailed
+```
+
+Filter to specific courses:
+
+```bash
+canvasctl grades summary --course 12345 --course BIO101
+```
+
+Output as JSON (useful for scripting):
+
+```bash
+canvasctl grades summary --json
+```
+
+Combine flags:
+
+```bash
+canvasctl grades summary --detailed --json --course 12345
+```
+
+## Exporting grades
+
+Export your grades to a file for offline analysis or tracking:
+
+```bash
+canvasctl grades export
+```
+
+By default, this creates a CSV file at `~/Downloads/canvasctl-grades.csv`.
+
+Export as JSON instead:
+
+```bash
+canvasctl grades export --format json
+```
+
+Include per-assignment detail:
+
+```bash
+canvasctl grades export --detailed
+```
+
+Choose a custom download location:
+
+```bash
+canvasctl grades export --dest ~/Desktop/reports
+```
+
+Filter to specific courses:
+
+```bash
+canvasctl grades export --course 12345 --course BIO101
+```
+
+Combine flags:
+
+```bash
+canvasctl grades export --detailed --format json --dest ~/Desktop --course 12345
+```
+
 ## Configuration deep-dive
 
 `canvas-control` has two destination concepts:
@@ -158,6 +241,22 @@ cvsctl download resume --manifest /path/to/.canvasctl-runs/<run-id>.json
 
 This is ideal for flaky networks or large course downloads.
 
+## Health check
+
+Before running downloads or after changing your config/token, verify that everything works:
+
+```bash
+python scripts/canvas-health-check.py
+```
+
+This calls the Canvas API to confirm your base URL and token are valid, and shows the authenticated user profile. Override the base URL with:
+
+```bash
+python scripts/canvas-health-check.py --base-url https://your-school.instructure.com
+```
+
+Exit code 0 on success, 1 on config/auth/API failure.
+
 ## Command reference
 
 Current command tree:
@@ -182,6 +281,7 @@ Available `--source` values:
 Behavior notes:
 
 - `--course` is required for `download run` and can be repeated.
+- `--course` is optional for `grades summary` and `grades export` (shows all courses when omitted).
 - `--source` defaults to all values when omitted.
 - `--dest` affects only the current command.
 - `--export-dest` requires `--dest` and persists that path.
@@ -189,6 +289,8 @@ Behavior notes:
 - `--force` is equivalent to overwrite true.
 - `--concurrency` defaults to configured `default_concurrency` (12).
 - `--manifest` is required for `download resume`.
+- `--format` defaults to `csv` for `grades export`.
+- `--dest` for `grades export` defaults to `~/Downloads`.
 - Every command supports `--help`.
 
 ## Troubleshooting
@@ -207,6 +309,12 @@ No files downloaded:
 - check source filters (`--source`)
 - run `cvsctl courses list --all` to verify course visibility/state
 - use `download interactive` to inspect course/file selections
+
+Grades show N/A:
+
+- verify you are enrolled as a student in the course
+- some courses may not publish grades until the term ends
+- use `--all` to include concluded courses
 
 ## Contributing
 
