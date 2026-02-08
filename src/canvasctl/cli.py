@@ -33,7 +33,10 @@ from canvasctl.config import (
 )
 from canvasctl.courses import course_to_dict, render_courses_table, sort_courses
 from canvasctl.grades import (
+    _default_export_dir,
     assignment_grade_to_dict,
+    export_grades_csv,
+    export_grades_json,
     grade_to_dict,
     render_detailed_grades_table,
     render_grades_summary_table,
@@ -560,6 +563,90 @@ def grades_summary(
                     )
                     console.print()
 
+        return 0
+
+    _run_with_client(resolved_base_url, action)
+
+
+class ExportFormat(str, Enum):
+    csv = "csv"
+    json = "json"
+
+
+@grades_app.command("export")
+def grades_export(
+    all_courses: bool = typer.Option(False, "--all", help="Include non-active courses."),
+    detailed: bool = typer.Option(
+        False, "--detailed", help="Include per-assignment breakdown."
+    ),
+    fmt: ExportFormat = typer.Option(
+        ExportFormat.csv,
+        "--format",
+        "-f",
+        help="Export format: csv (default) or json.",
+    ),
+    dest: Path | None = typer.Option(
+        None,
+        "--dest",
+        help="Destination directory for the export file. Defaults to ~/Downloads.",
+    ),
+    course_selectors: list[str] | None = typer.Option(
+        None,
+        "--course",
+        "-c",
+        help="Course ID or course code. Use multiple times to filter.",
+    ),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Canvas instance URL override."
+    ),
+) -> None:
+    """Export grades to a CSV or JSON file."""
+    cfg = _load_config_or_fail()
+    resolved_base_url = _resolve_base_url_or_fail(cfg, base_url)
+    export_dir = dest.expanduser().resolve() if dest is not None else _default_export_dir()
+
+    def action(client: CanvasClient) -> int:
+        all_grades = sort_grades(
+            client.list_courses_with_grades(include_all=all_courses)
+        )
+
+        if course_selectors:
+            course_summaries = [
+                CourseSummary(
+                    id=g.course_id,
+                    course_code=g.course_code,
+                    name=g.course_name,
+                    workflow_state=None,
+                    term_name=None,
+                    start_at=None,
+                    end_at=None,
+                )
+                for g in all_grades
+            ]
+            selected = _resolve_courses_from_selectors(
+                course_summaries, course_selectors
+            )
+            selected_ids = {c.id for c in selected}
+            all_grades = [g for g in all_grades if g.course_id in selected_ids]
+
+        assignments_by_course: dict[int, list] | None = None
+        if detailed:
+            assignments_by_course = {}
+            for course_grade in all_grades:
+                assignments_by_course[course_grade.course_id] = sort_assignment_grades(
+                    client.list_assignment_grades(course_grade.course_id)
+                )
+
+        extension = fmt.value
+        filename = f"canvasctl-grades.{extension}"
+        file_path = export_dir / filename
+
+        if fmt == ExportFormat.json:
+            written = export_grades_json(all_grades, assignments_by_course, file_path)
+        else:
+            written = export_grades_csv(all_grades, assignments_by_course, file_path)
+
+        console.print(f"[green]Exported grades to:[/green] {written}")
         return 0
 
     _run_with_client(resolved_base_url, action)

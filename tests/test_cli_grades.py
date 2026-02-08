@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -160,5 +162,83 @@ def test_grades_summary_course_filter(monkeypatch):
 
     assert result.exit_code == 0
     parsed = json.loads(result.output)
+    assert len(parsed) == 1
+    assert parsed[0]["course_id"] == 100
+
+
+def test_grades_export_csv_default(monkeypatch, tmp_path):
+    runner = CliRunner()
+    _patch(monkeypatch)
+    monkeypatch.setattr("canvasctl.cli._default_export_dir", lambda: tmp_path)
+
+    result = runner.invoke(app, ["grades", "export"])
+
+    assert result.exit_code == 0
+    csv_file = tmp_path / "canvasctl-grades.csv"
+    assert csv_file.exists()
+    with csv_file.open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[0] == ["course_id", "course_code", "course_name", "letter_grade", "score"]
+    assert len(rows) == 3  # header + 2 courses
+
+
+def test_grades_export_json(monkeypatch, tmp_path):
+    runner = CliRunner()
+    _patch(monkeypatch)
+    monkeypatch.setattr("canvasctl.cli._default_export_dir", lambda: tmp_path)
+
+    result = runner.invoke(app, ["grades", "export", "--format", "json"])
+
+    assert result.exit_code == 0
+    json_file = tmp_path / "canvasctl-grades.json"
+    assert json_file.exists()
+    parsed = json.loads(json_file.read_text(encoding="utf-8"))
+    assert len(parsed) == 2
+    assert parsed[0]["course_code"] == "BIO101"
+
+
+def test_grades_export_detailed_csv(monkeypatch, tmp_path):
+    runner = CliRunner()
+    _patch(monkeypatch)
+    monkeypatch.setattr("canvasctl.cli._default_export_dir", lambda: tmp_path)
+
+    result = runner.invoke(app, ["grades", "export", "--detailed"])
+
+    assert result.exit_code == 0
+    csv_file = tmp_path / "canvasctl-grades.csv"
+    assert csv_file.exists()
+    with csv_file.open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[0][3] == "assignment_id"
+    assert rows[0][4] == "assignment_name"
+    # 2 courses * 2 assignments each = 4 data rows + header
+    assert len(rows) == 5
+
+
+def test_grades_export_custom_dest(monkeypatch, tmp_path):
+    runner = CliRunner()
+    _patch(monkeypatch)
+    custom_dir = tmp_path / "my-exports"
+    custom_dir.mkdir()
+
+    result = runner.invoke(app, ["grades", "export", "--dest", str(custom_dir)])
+
+    assert result.exit_code == 0
+    csv_file = custom_dir / "canvasctl-grades.csv"
+    assert csv_file.exists()
+
+
+def test_grades_export_course_filter(monkeypatch, tmp_path):
+    runner = CliRunner()
+    _patch(monkeypatch)
+    monkeypatch.setattr("canvasctl.cli._default_export_dir", lambda: tmp_path)
+
+    result = runner.invoke(
+        app, ["grades", "export", "--format", "json", "--course", "100"]
+    )
+
+    assert result.exit_code == 0
+    json_file = tmp_path / "canvasctl-grades.json"
+    parsed = json.loads(json_file.read_text(encoding="utf-8"))
     assert len(parsed) == 1
     assert parsed[0]["course_id"] == 100
