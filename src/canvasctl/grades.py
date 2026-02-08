@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import asdict
+from pathlib import Path
 
 from rich.table import Table
 
@@ -93,3 +96,100 @@ def render_detailed_grades_table(
     )
 
     return table
+
+
+def _default_export_dir() -> Path:
+    """Return the user's Downloads folder as the default export location."""
+    return Path.home() / "Downloads"
+
+
+def export_grades_csv(
+    grades: list[CourseGrade],
+    assignments_by_course: dict[int, list[AssignmentGrade]] | None,
+    dest: Path,
+) -> Path:
+    """Export grades to a CSV file and return the written path."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    with dest.open("w", newline="", encoding="utf-8") as fh:
+        if assignments_by_course is None:
+            writer = csv.writer(fh)
+            writer.writerow(
+                ["course_id", "course_code", "course_name", "letter_grade", "score"]
+            )
+            for g in grades:
+                writer.writerow(
+                    [
+                        g.course_id,
+                        g.course_code,
+                        g.course_name,
+                        g.current_grade or "",
+                        g.current_score if g.current_score is not None else "",
+                    ]
+                )
+        else:
+            writer = csv.writer(fh)
+            writer.writerow(
+                [
+                    "course_id",
+                    "course_code",
+                    "course_name",
+                    "assignment_id",
+                    "assignment_name",
+                    "score",
+                    "points_possible",
+                    "grade",
+                    "status",
+                    "submitted_at",
+                    "course_letter_grade",
+                    "course_score",
+                ]
+            )
+            for g in grades:
+                course_assignments = assignments_by_course.get(g.course_id, [])
+                for ag in course_assignments:
+                    writer.writerow(
+                        [
+                            g.course_id,
+                            g.course_code,
+                            g.course_name,
+                            ag.assignment_id,
+                            ag.assignment_name,
+                            ag.score if ag.score is not None else "",
+                            ag.points_possible if ag.points_possible is not None else "",
+                            ag.grade or "",
+                            ag.workflow_state or "",
+                            ag.submitted_at or "",
+                            g.current_grade or "",
+                            g.current_score if g.current_score is not None else "",
+                        ]
+                    )
+
+    return dest
+
+
+def export_grades_json(
+    grades: list[CourseGrade],
+    assignments_by_course: dict[int, list[AssignmentGrade]] | None,
+    dest: Path,
+) -> Path:
+    """Export grades to a JSON file and return the written path."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if assignments_by_course is None:
+        payload = [grade_to_dict(g) for g in grades]
+    else:
+        payload = []
+        for g in grades:
+            course_assignments = assignments_by_course.get(g.course_id, [])
+            payload.append(
+                {
+                    "course": grade_to_dict(g),
+                    "assignments": [
+                        assignment_grade_to_dict(a) for a in course_assignments
+                    ],
+                }
+            )
+
+    dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return dest

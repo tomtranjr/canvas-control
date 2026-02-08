@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import csv
+import json
+
 from canvasctl.canvas_api import AssignmentGrade, CourseGrade
 from canvasctl.grades import (
     assignment_grade_to_dict,
+    export_grades_csv,
+    export_grades_json,
     grade_to_dict,
     render_detailed_grades_table,
     render_grades_summary_table,
@@ -137,3 +142,90 @@ def test_render_detailed_grades_table_shows_assignments():
     rendered = output.getvalue()
     assert "Midterm Exam" in rendered
     assert "Final Paper" in rendered
+
+
+def test_export_grades_csv_summary(tmp_path):
+    grades = [
+        _make_course_grade(course_id=1, course_code="BIO101"),
+        _make_course_grade(course_id=2, course_code="MATH201", current_score=87.0, current_grade="B+"),
+    ]
+    dest = tmp_path / "grades.csv"
+    result = export_grades_csv(grades, None, dest)
+
+    assert result == dest
+    assert dest.exists()
+
+    with dest.open(newline="", encoding="utf-8") as fh:
+        reader = csv.reader(fh)
+        rows = list(reader)
+
+    assert rows[0] == ["course_id", "course_code", "course_name", "letter_grade", "score"]
+    assert rows[1][0] == "1"
+    assert rows[1][1] == "BIO101"
+    assert rows[1][3] == "A-"
+    assert rows[2][1] == "MATH201"
+    assert len(rows) == 3
+
+
+def test_export_grades_csv_detailed(tmp_path):
+    grades = [_make_course_grade(course_id=1)]
+    assignments_by_course = {
+        1: [
+            _make_assignment_grade(assignment_id=10, assignment_name="Homework 1"),
+            _make_assignment_grade(assignment_id=11, assignment_name="Quiz 1", score=45.0),
+        ]
+    }
+    dest = tmp_path / "grades-detailed.csv"
+    result = export_grades_csv(grades, assignments_by_course, dest)
+
+    assert result == dest
+    with dest.open(newline="", encoding="utf-8") as fh:
+        reader = csv.reader(fh)
+        rows = list(reader)
+
+    assert rows[0][0] == "course_id"
+    assert rows[0][3] == "assignment_id"
+    assert rows[0][4] == "assignment_name"
+    assert len(rows) == 3  # header + 2 assignments
+    assert rows[1][4] == "Homework 1"
+    assert rows[2][4] == "Quiz 1"
+
+
+def test_export_grades_json_summary(tmp_path):
+    grades = [
+        _make_course_grade(course_id=1),
+        _make_course_grade(course_id=2, course_code="MATH201"),
+    ]
+    dest = tmp_path / "grades.json"
+    result = export_grades_json(grades, None, dest)
+
+    assert result == dest
+    parsed = json.loads(dest.read_text(encoding="utf-8"))
+    assert len(parsed) == 2
+    assert parsed[0]["course_id"] == 1
+    assert parsed[1]["course_code"] == "MATH201"
+
+
+def test_export_grades_json_detailed(tmp_path):
+    grades = [_make_course_grade(course_id=1)]
+    assignments_by_course = {
+        1: [_make_assignment_grade(assignment_id=10, assignment_name="Homework 1")]
+    }
+    dest = tmp_path / "grades-detailed.json"
+    result = export_grades_json(grades, assignments_by_course, dest)
+
+    assert result == dest
+    parsed = json.loads(dest.read_text(encoding="utf-8"))
+    assert len(parsed) == 1
+    assert "course" in parsed[0]
+    assert "assignments" in parsed[0]
+    assert parsed[0]["course"]["course_id"] == 1
+    assert parsed[0]["assignments"][0]["assignment_name"] == "Homework 1"
+
+
+def test_export_creates_parent_directories(tmp_path):
+    grades = [_make_course_grade()]
+    dest = tmp_path / "nested" / "dir" / "grades.csv"
+    result = export_grades_csv(grades, None, dest)
+    assert result == dest
+    assert dest.exists()
