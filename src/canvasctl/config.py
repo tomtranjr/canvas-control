@@ -9,7 +9,7 @@ import platformdirs
 import tomllib
 import tomli_w
 
-APP_NAME = "canvasctl"
+APP_NAME = "canvas-control"
 DEFAULT_CONCURRENCY = 12
 
 
@@ -142,5 +142,5 @@ def resolve_base_url(base_url_override: str | None, cfg: AppConfig) -> str:
     if cfg.base_url:
         return cfg.base_url
     raise ConfigError(
-        "Canvas base URL is required. Use --base-url or run 'canvasctl config set-base-url <url>'."
+        "Canvas base URL is required. Use --base-url or run 'cvsctl config set-base-url <url>'."
     )

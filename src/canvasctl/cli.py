@@ -67,7 +67,7 @@ from canvasctl.sources import (
 )
 
 app = typer.Typer(help="Canvas LMS CLI")
-config_app = typer.Typer(help="Manage local canvasctl config")
+config_app = typer.Typer(help="Manage local cvsctl config")
 courses_app = typer.Typer(help="List and inspect courses")
 download_app = typer.Typer(help="Download course files")
 grades_app = typer.Typer(help="View course grades")
@@ -239,7 +239,7 @@ def _resolve_courses_from_selectors(
 
 
 def _render_config_table(cfg: AppConfig) -> Table:
-    table = Table(title="canvasctl Config")
+    table = Table(title="cvsctl Config")
     table.add_column("Key", style="cyan")
     table.add_column("Value")
     table.add_row("base_url", cfg.base_url or "")
@@ -753,7 +753,10 @@ def download_interactive(
             console.print("[yellow]No active courses available.[/yellow]")
             return 0
 
-        selection = prompt_interactive_selection(all_courses)
+        try:
+            selection = prompt_interactive_selection(all_courses)
+        except RuntimeError as exc:
+            _fail(str(exc))
         selected_map = {course.id: course for course in all_courses}
         selected_courses = [
             selected_map[course_id]
