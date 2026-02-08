@@ -22,10 +22,12 @@ def render_courses_table(courses: list[CourseSummary]) -> Table:
     table.add_column("End")
 
     for course in courses:
+        course_code_display = (course.course_code or "").strip()
+        name_display = (course.name or "").strip()
         table.add_row(
             str(course.id),
-            course.course_code,
-            course.name,
+            course_code_display,
+            name_display,
             course.workflow_state or "",
             course.term_name or "",
             course.start_at or "",
