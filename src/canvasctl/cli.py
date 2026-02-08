@@ -51,7 +51,7 @@ from canvasctl.downloader import (
     result_to_manifest_item,
     summarize_results,
 )
-from canvasctl.interactive import prompt_file_selection, prompt_interactive_selection
+from canvasctl.interactive import prompt_interactive_selection
 from canvasctl.manifest import (
     course_manifest_path,
     index_items_by_file_id,
@@ -258,7 +258,6 @@ def _download_for_courses(
     force: bool,
     concurrency: int,
     base_url: str,
-    selected_file_ids: dict[int, set[int]] | None = None,
 ) -> int:
     run_id = str(uuid.uuid4())
     started_at = _iso_now()
@@ -277,10 +276,6 @@ def _download_for_courses(
 
     for course in selected_courses:
         remote_files, warnings = collect_remote_files_for_course(client, course.id, sources)
-
-        if selected_file_ids and course.id in selected_file_ids:
-            allowed = selected_file_ids[course.id]
-            remote_files = [item for item in remote_files if item.file_id in allowed]
 
         if not remote_files and not warnings:
             console.print(f"[yellow]No files found for course {course.id} ({course.name}).[/yellow]")
@@ -766,17 +761,6 @@ def download_interactive(
         if not selected_courses:
             _fail("No valid courses selected.")
 
-        file_selection: dict[int, set[int]] = {}
-        if selection.granularity == "file":
-            for course in selected_courses:
-                remote_files, _warnings = collect_remote_files_for_course(
-                    client,
-                    course.id,
-                    selection.sources,
-                )
-                selected_file_ids = prompt_file_selection(course=course, remote_files=remote_files)
-                file_selection[course.id] = selected_file_ids
-
         return _download_for_courses(
             client=client,
             selected_courses=selected_courses,
@@ -785,7 +769,6 @@ def download_interactive(
             force=force,
             concurrency=resolved_concurrency,
             base_url=resolved_base_url,
-            selected_file_ids=file_selection if file_selection else None,
         )
 
     exit_code = _run_with_client(resolved_base_url, action)
