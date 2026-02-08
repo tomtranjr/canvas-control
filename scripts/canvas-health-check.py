@@ -2,9 +2,9 @@
 """
 Canvas connectivity health check.
 
-Uses canvasctl config, auth, and API client to verify that the configured
-Canvas base URL and token work. Does not modify any canvasctl state.
-Run from project root after installing canvasctl (e.g. uv pip install -e .):
+Uses canvas-control config, auth, and API client to verify that the configured
+Canvas base URL and token work. Does not modify any canvas-control state.
+Run from project root after installing canvas-control (e.g. uv pip install -e .):
 
     python scripts/canvas-health-check.py
     python scripts/canvas-health-check.py --base-url https://your-school.instructure.com
@@ -85,7 +85,7 @@ def main() -> int:
         "--base-url",
         type=str,
         default=None,
-        help="Override Canvas instance URL (otherwise uses canvasctl config).",
+        help="Override Canvas instance URL (otherwise uses canvas-control config).",
     )
     args = parser.parse_args()
     return _run_health_check(args.base_url)

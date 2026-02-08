@@ -16,7 +16,7 @@ wheels = [
 ]
 
 [[package]]
-name = "canvasctl"
+name = "canvas-control"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
