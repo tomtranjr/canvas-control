@@ -1,6 +1,6 @@
 # Scripts
 
-Optional utilities that use canvasctl. Install the project first: `uv pip install -e .`
+Optional utilities that use canvas-control. Install the project first: `uv pip install -e .`
 
 ## canvas-health-check.py
 
