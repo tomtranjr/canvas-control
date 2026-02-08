@@ -119,7 +119,7 @@ cvsctl download run --course 12345 --overwrite true
 Check your current grades across all active courses:
 
 ```bash
-canvasctl grades summary
+cvsctl grades summary
 ```
 
 This prints a table with course name, letter grade, and percentage for each course.
@@ -127,31 +127,31 @@ This prints a table with course name, letter grade, and percentage for each cour
 Include concluded/past courses:
 
 ```bash
-canvasctl grades summary --all
+cvsctl grades summary --all
 ```
 
 See a per-assignment breakdown (scores, possible points, status):
 
 ```bash
-canvasctl grades summary --detailed
+cvsctl grades summary --detailed
 ```
 
 Filter to specific courses:
 
 ```bash
-canvasctl grades summary --course 12345 --course BIO101
+cvsctl grades summary --course 12345 --course BIO101
 ```
 
 Output as JSON (useful for scripting):
 
 ```bash
-canvasctl grades summary --json
+cvsctl grades summary --json
 ```
 
 Combine flags:
 
 ```bash
-canvasctl grades summary --detailed --json --course 12345
+cvsctl grades summary --detailed --json --course 12345
 ```
 
 ## Exporting grades
@@ -159,7 +159,7 @@ canvasctl grades summary --detailed --json --course 12345
 Export your grades to a file for offline analysis or tracking:
 
 ```bash
-canvasctl grades export
+cvsctl grades export
 ```
 
 By default, this creates a CSV file at `~/Downloads/canvasctl-grades.csv`.
@@ -167,31 +167,31 @@ By default, this creates a CSV file at `~/Downloads/canvasctl-grades.csv`.
 Export as JSON instead:
 
 ```bash
-canvasctl grades export --format json
+cvsctl grades export --format json
 ```
 
 Include per-assignment detail:
 
 ```bash
-canvasctl grades export --detailed
+cvsctl grades export --detailed
 ```
 
 Choose a custom download location:
 
 ```bash
-canvasctl grades export --dest ~/Desktop/reports
+cvsctl grades export --dest ~/Desktop/reports
 ```
 
 Filter to specific courses:
 
 ```bash
-canvasctl grades export --course 12345 --course BIO101
+cvsctl grades export --course 12345 --course BIO101
 ```
 
 Combine flags:
 
 ```bash
-canvasctl grades export --detailed --format json --dest ~/Desktop --course 12345
+cvsctl grades export --detailed --format json --dest ~/Desktop --course 12345
 ```
 
 ## Configuration deep-dive
