@@ -11,6 +11,22 @@ Instead of clicking through files one-by-one, you can:
 - use interactive prompts when you want guidance
 - generate manifests so failed downloads can be resumed
 
+## Table of contents
+
+- [Why canvas-control is powerful](#why-canvas-control-is-powerful)
+- [Quick start](#quick-start)
+- [Set `CANVAS_TOKEN`](#set-canvas_token)
+- [First real workflow](#first-real-workflow)
+- [Viewing grades](#viewing-grades)
+- [Exporting grades](#exporting-grades)
+- [Configuration deep-dive](#configuration-deep-dive)
+- [Interactive mode](#interactive-mode)
+- [Resume failed downloads](#resume-failed-downloads)
+- [Health check](#health-check)
+- [Command reference](#command-reference)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+
 ## Why canvas-control is powerful
 
 - One command can download from `files`, `assignments`, `discussions`, `pages`, and `modules`.
@@ -243,13 +259,20 @@ This is ideal for flaky networks or large course downloads.
 
 ## Health check
 
-Before running downloads or after changing your config/token, verify that everything works:
+Use the health check before your first download, after rotating credentials, or when you suspect auth/config issues:
 
 ```bash
 python scripts/canvas-health-check.py
 ```
 
-This calls the Canvas API to confirm your base URL and token are valid, and shows the authenticated user profile. Override the base URL with:
+This check validates:
+
+- your effective Canvas base URL (config or override)
+- your resolved token source (`CANVAS_TOKEN` or prompt flow)
+- successful auth by calling `users/self/profile`
+- the identity Canvas returns for the token
+
+Override the base URL with:
 
 ```bash
 python scripts/canvas-health-check.py --base-url https://your-school.instructure.com
