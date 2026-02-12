@@ -262,7 +262,7 @@ This is ideal for flaky networks or large course downloads.
 Use the health check before your first download, after rotating credentials, or when you suspect auth/config issues:
 
 ```bash
-python scripts/canvas-health-check.py
+cvsctl test
 ```
 
 This check validates:
@@ -275,7 +275,7 @@ This check validates:
 Override the base URL with:
 
 ```bash
-python scripts/canvas-health-check.py --base-url https://your-school.instructure.com
+cvsctl test --base-url https://your-school.instructure.com
 ```
 
 Exit code 0 on success, 1 on config/auth/API failure.
@@ -289,6 +289,7 @@ Current command tree:
 - `cvsctl config clear-download-path`
 - `cvsctl config show`
 - `cvsctl courses list [--all] [--json] [--base-url <url>]`
+- `cvsctl test [--base-url <url>]`
 - `cvsctl download run --course <id-or-code>... [--source <source>...] [--dest <path>] [--export-dest] [--overwrite <bool>] [--force] [--concurrency <n>] [--base-url <url>]`
 - `cvsctl download interactive [--dest <path>] [--export-dest] [--base-url <url>] [--concurrency <n>] [--force]`
 - `cvsctl download resume --manifest <path>`

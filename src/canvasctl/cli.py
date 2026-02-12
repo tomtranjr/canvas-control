@@ -238,6 +238,22 @@ def _resolve_courses_from_selectors(
     return selected
 
 
+def _run_connectivity_test(*, client: CanvasClient, base_url: str) -> int:
+    profile = client.get_json("users/self/profile")
+    name = str(profile.get("name") or "Unknown")
+    login_id = str(profile.get("login_id") or profile.get("primary_email") or "")
+
+    table = Table(title="Canvas connectivity test")
+    table.add_column("Check", style="cyan")
+    table.add_column("Result")
+    table.add_row("Base URL", base_url)
+    table.add_row("API access", "OK (200)")
+    table.add_row("Authenticated as", f"{name}" + (f" ({login_id})" if login_id else ""))
+    console.print(table)
+    console.print("[green]Connectivity test passed.[/green]")
+    return 0
+
+
 def _render_config_table(cfg: AppConfig) -> Table:
     table = Table(title="cvsctl Config")
     table.add_column("Key", style="cyan")
@@ -479,6 +495,22 @@ def courses_list(
         return 0
 
     _run_with_client(resolved_base_url, action)
+
+
+@app.command("test")
+def test_connection(
+    base_url: str | None = typer.Option(None, "--base-url", help="Canvas instance URL override."),
+) -> None:
+    """Validate that configured Canvas API access is working."""
+    cfg = _load_config_or_fail()
+    resolved_base_url = _resolve_base_url_or_fail(cfg, base_url)
+
+    def action(client: CanvasClient) -> int:
+        return _run_connectivity_test(client=client, base_url=resolved_base_url)
+
+    exit_code = _run_with_client(resolved_base_url, action)
+    if exit_code:
+        raise typer.Exit(code=exit_code)
 
 
 @grades_app.command("summary")
