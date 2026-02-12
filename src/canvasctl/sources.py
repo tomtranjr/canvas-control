@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from canvasctl.canvas_api import CanvasApiError, CanvasClient, RemoteFile
+from canvasctl.manifest import ManifestItem
 
 ALL_SOURCES = ("files", "assignments", "discussions", "pages", "modules")
 _FILE_ID_PATTERNS = (
@@ -272,7 +273,7 @@ def warning_to_manifest_item(
     warning: SourceWarning,
     *,
     course_id: int,
-) -> dict[str, Any]:
+) -> ManifestItem:
     return {
         "file_id": None,
         "course_id": course_id,

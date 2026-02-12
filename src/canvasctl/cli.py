@@ -53,6 +53,8 @@ from canvasctl.downloader import (
 )
 from canvasctl.interactive import prompt_interactive_selection
 from canvasctl.manifest import (
+    ManifestItem,
+    ManifestPayload,
     course_manifest_path,
     index_items_by_file_id,
     load_manifest,
@@ -238,6 +240,48 @@ def _resolve_courses_from_selectors(
     return selected
 
 
+def _course_summaries_from_grades(grades: Sequence[CourseGrade]) -> list[CourseSummary]:
+    return [
+        CourseSummary(
+            id=grade.course_id,
+            course_code=grade.course_code,
+            name=grade.course_name,
+            workflow_state=None,
+            term_name=None,
+            start_at=None,
+            end_at=None,
+        )
+        for grade in grades
+    ]
+
+
+def _filter_grades_by_selectors(
+    grades: Sequence[CourseGrade],
+    course_selectors: Sequence[str] | None,
+) -> list[CourseGrade]:
+    if not course_selectors:
+        return list(grades)
+
+    selected = _resolve_courses_from_selectors(
+        _course_summaries_from_grades(grades),
+        course_selectors,
+    )
+    selected_ids = {course.id for course in selected}
+    return [grade for grade in grades if grade.course_id in selected_ids]
+
+
+def _assignment_grades_by_course(
+    client: CanvasClient,
+    grades: Sequence[CourseGrade],
+) -> dict[int, list[AssignmentGrade]]:
+    out: dict[int, list[AssignmentGrade]] = {}
+    for course_grade in grades:
+        out[course_grade.course_id] = sort_assignment_grades(
+            client.list_assignment_grades(course_grade.course_id)
+        )
+    return out
+
+
 def _render_config_table(cfg: AppConfig) -> Table:
     table = Table(title="cvsctl Config")
     table.add_column("Key", style="cyan")
@@ -294,7 +338,9 @@ def _download_for_courses(
             console=console,
         )
 
-        manifest_items = [result_to_manifest_item(result) for result in results]
+        manifest_items: list[ManifestItem] = [
+            result_to_manifest_item(result) for result in results
+        ]
         manifest_items.extend(
             warning_to_manifest_item(warning, course_id=course.id) for warning in warnings
         )
@@ -339,7 +385,7 @@ def _download_for_courses(
 
     console.print(summary_table)
 
-    run_payload = {
+    run_payload: ManifestPayload = {
         "run_id": run_id,
         "base_url": base_url,
         "sources": sources,
@@ -354,7 +400,7 @@ def _download_for_courses(
     return 1 if had_failures else 0
 
 
-def _tasks_from_manifest_payload(payload: dict[str, object]) -> tuple[str, list[DownloadTask]]:
+def _tasks_from_manifest_payload(payload: ManifestPayload) -> tuple[str, list[DownloadTask]]:
     base_url = payload.get("base_url")
     if not isinstance(base_url, str) or not base_url:
         _fail("Manifest does not include a valid base_url.")
@@ -507,24 +553,7 @@ def grades_summary(
             client.list_courses_with_grades(include_all=all_courses)
         )
 
-        if course_selectors:
-            course_summaries = [
-                CourseSummary(
-                    id=g.course_id,
-                    course_code=g.course_code,
-                    name=g.course_name,
-                    workflow_state=None,
-                    term_name=None,
-                    start_at=None,
-                    end_at=None,
-                )
-                for g in all_grades
-            ]
-            selected = _resolve_courses_from_selectors(
-                course_summaries, course_selectors
-            )
-            selected_ids = {c.id for c in selected}
-            all_grades = [g for g in all_grades if g.course_id in selected_ids]
+        all_grades = _filter_grades_by_selectors(all_grades, course_selectors)
 
         if not detailed:
             if json_output:
@@ -533,28 +562,25 @@ def grades_summary(
             else:
                 console.print(render_grades_summary_table(all_grades))
         else:
+            assignments_by_course = _assignment_grades_by_course(client, all_grades)
             if json_output:
-                payload = []
-                for course_grade in all_grades:
-                    assignments = sort_assignment_grades(
-                        client.list_assignment_grades(course_grade.course_id)
-                    )
-                    payload.append(
-                        {
-                            "course": grade_to_dict(course_grade),
-                            "assignments": [
-                                assignment_grade_to_dict(a) for a in assignments
-                            ],
-                        }
-                    )
+                payload = [
+                    {
+                        "course": grade_to_dict(course_grade),
+                        "assignments": [
+                            assignment_grade_to_dict(assignment)
+                            for assignment in assignments_by_course[course_grade.course_id]
+                        ],
+                    }
+                    for course_grade in all_grades
+                ]
                 console.print(json.dumps(payload, indent=2))
             else:
                 for course_grade in all_grades:
-                    assignments = sort_assignment_grades(
-                        client.list_assignment_grades(course_grade.course_id)
-                    )
                     console.print(
-                        render_detailed_grades_table(course_grade, assignments)
+                        render_detailed_grades_table(
+                            course_grade, assignments_by_course[course_grade.course_id]
+                        )
                     )
                     console.print()
 
@@ -605,32 +631,11 @@ def grades_export(
             client.list_courses_with_grades(include_all=all_courses)
         )
 
-        if course_selectors:
-            course_summaries = [
-                CourseSummary(
-                    id=g.course_id,
-                    course_code=g.course_code,
-                    name=g.course_name,
-                    workflow_state=None,
-                    term_name=None,
-                    start_at=None,
-                    end_at=None,
-                )
-                for g in all_grades
-            ]
-            selected = _resolve_courses_from_selectors(
-                course_summaries, course_selectors
-            )
-            selected_ids = {c.id for c in selected}
-            all_grades = [g for g in all_grades if g.course_id in selected_ids]
+        all_grades = _filter_grades_by_selectors(all_grades, course_selectors)
 
-        assignments_by_course: dict[int, list] | None = None
+        assignments_by_course: dict[int, list[AssignmentGrade]] | None = None
         if detailed:
-            assignments_by_course = {}
-            for course_grade in all_grades:
-                assignments_by_course[course_grade.course_id] = sort_assignment_grades(
-                    client.list_assignment_grades(course_grade.course_id)
-                )
+            assignments_by_course = _assignment_grades_by_course(client, all_grades)
 
         extension = fmt.value
         filename = f"canvasctl-grades.{extension}"
@@ -826,7 +831,7 @@ def download_resume(
         )
         console.print(summary_table)
 
-        run_payload = {
+        run_payload: ManifestPayload = {
             "run_id": str(uuid.uuid4()),
             "base_url": base_url,
             "sources": ["resume"],

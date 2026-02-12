@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
 
 from canvasctl.canvas_api import CanvasClient, CourseSummary, RemoteFile
+from canvasctl.manifest import ManifestItem
 
 _INVALID_SEGMENT_RE = re.compile(r"[^A-Za-z0-9._ -]+")
 
@@ -218,7 +219,7 @@ def download_tasks(
     return results
 
 
-def result_to_manifest_item(result: DownloadResult) -> dict[str, Any]:
+def result_to_manifest_item(result: DownloadResult) -> ManifestItem:
     return {
         "file_id": result.task.file.file_id,
         "course_id": result.task.course_id,
