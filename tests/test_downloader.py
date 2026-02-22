@@ -57,6 +57,22 @@ def test_plan_course_download_tasks_resolves_collision(tmp_path):
     assert paths[1] == "intro_12.pdf"
 
 
+def test_plan_course_download_tasks_with_course_dest(tmp_path):
+    course = _course()
+    files = [_file(11, "intro.pdf")]
+    course_dest = tmp_path / "my-class"
+
+    tasks = plan_course_download_tasks(
+        course, files, dest_root=tmp_path, course_dest=course_dest,
+    )
+
+    assert len(tasks) == 1
+    # Files should land under course_dest directly, not under course_slug
+    assert tasks[0].local_path == course_dest / "Week 1" / "intro.pdf"
+    # Should NOT contain the course slug in the path
+    assert "math101-1" not in str(tasks[0].local_path)
+
+
 def test_download_tasks_skips_unchanged(tmp_path):
     course = _course()
     file_obj = _file(11, "intro.pdf")

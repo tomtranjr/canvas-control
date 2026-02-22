@@ -84,9 +84,10 @@ def plan_course_download_tasks(
     remote_files: list[RemoteFile],
     *,
     dest_root: Path,
+    course_dest: Path | None = None,
 ) -> list[DownloadTask]:
     course_slug = build_course_slug(course)
-    course_root = dest_root / course_slug
+    course_root = course_dest if course_dest is not None else dest_root / course_slug
 
     planned: dict[Path, int] = {}
     tasks: list[DownloadTask] = []

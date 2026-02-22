@@ -22,6 +22,7 @@ class AppConfig:
     base_url: str | None = None
     default_dest: str | None = None
     default_concurrency: int = DEFAULT_CONCURRENCY
+    course_paths: dict[str, str] | None = None
 
     def destination_path(self, cwd: Path | None = None) -> Path:
         if self.default_dest:
@@ -96,10 +97,22 @@ def load_config() -> AppConfig:
     if not isinstance(default_concurrency, int) or default_concurrency <= 0:
         raise ConfigError("Config key 'default_concurrency' must be a positive integer.")
 
+    course_paths: dict[str, str] | None = None
+    raw_course_paths = raw.get("course_paths")
+    if raw_course_paths is not None:
+        if not isinstance(raw_course_paths, dict):
+            raise ConfigError("Config key 'course_paths' must be a TOML table.")
+        course_paths = {}
+        for key, value in raw_course_paths.items():
+            if not isinstance(value, str):
+                raise ConfigError(f"course_paths.{key} must be a string path.")
+            course_paths[str(key)] = normalize_destination_path(value)
+
     return AppConfig(
         base_url=base_url,
         default_dest=default_dest,
         default_concurrency=default_concurrency,
+        course_paths=course_paths if course_paths else None,
     )
 
 
@@ -112,6 +125,8 @@ def save_config(config: AppConfig) -> None:
         payload["base_url"] = config.base_url
     if config.default_dest is not None:
         payload["default_dest"] = config.default_dest
+    if config.course_paths:
+        payload["course_paths"] = config.course_paths
     config_path().write_text(tomli_w.dumps(payload), encoding="utf-8")
 
 
@@ -134,6 +149,37 @@ def clear_default_destination() -> AppConfig:
     cfg.default_dest = None
     save_config(cfg)
     return cfg
+
+
+def set_course_path(course_id: int, path: str | Path) -> AppConfig:
+    cfg = load_config()
+    normalized = normalize_destination_path(path)
+    if cfg.course_paths is None:
+        cfg.course_paths = {}
+    cfg.course_paths[str(course_id)] = normalized
+    save_config(cfg)
+    return cfg
+
+
+def clear_course_path(course_id: int) -> AppConfig:
+    cfg = load_config()
+    key = str(course_id)
+    if cfg.course_paths is None or key not in cfg.course_paths:
+        raise ConfigError(f"No course path configured for course {course_id}.")
+    del cfg.course_paths[key]
+    if not cfg.course_paths:
+        cfg.course_paths = None
+    save_config(cfg)
+    return cfg
+
+
+def get_course_path(course_id: int, cfg: AppConfig) -> Path | None:
+    if not cfg.course_paths:
+        return None
+    value = cfg.course_paths.get(str(course_id))
+    if value is None:
+        return None
+    return Path(value)
 
 
 def resolve_base_url(base_url_override: str | None, cfg: AppConfig) -> str:

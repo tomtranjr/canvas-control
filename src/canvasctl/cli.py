@@ -25,10 +25,13 @@ from canvasctl.config import (
     AppConfig,
     ConfigError,
     DEFAULT_CONCURRENCY,
+    clear_course_path,
     clear_default_destination,
+    get_course_path,
     load_config,
     resolve_base_url,
     set_base_url,
+    set_course_path,
     set_default_destination,
 )
 from canvasctl.courses import course_to_dict, render_courses_table, sort_courses
@@ -57,6 +60,7 @@ from canvasctl.manifest import (
     index_items_by_file_id,
     load_manifest,
     write_course_manifest,
+    write_manifest,
     write_run_summary,
 )
 from canvasctl.sources import (
@@ -249,6 +253,8 @@ def _render_config_table(cfg: AppConfig) -> Table:
     table.add_row("default_dest", cfg.default_dest or "")
     table.add_row("effective_dest", str(_resolve_destination(None, cfg)))
     table.add_row("default_concurrency", str(cfg.default_concurrency))
+    course_path_count = len(cfg.course_paths) if cfg.course_paths else 0
+    table.add_row("course_paths", str(course_path_count))
     return table
 
 
@@ -261,6 +267,7 @@ def _download_for_courses(
     force: bool,
     concurrency: int,
     base_url: str,
+    course_paths: dict[str, str] | None = None,
 ) -> int:
     run_id = str(uuid.uuid4())
     started_at = _iso_now()
@@ -284,10 +291,21 @@ def _download_for_courses(
             console.print(f"[yellow]No files found for course {course.id} ({course.name}).[/yellow]")
 
         course_slug = build_course_slug(course)
-        existing_manifest = load_manifest(course_manifest_path(dest_root, course_slug))
+        custom_dest: Path | None = None
+        if course_paths and str(course.id) in course_paths:
+            custom_dest = Path(course_paths[str(course.id)])
+
+        if custom_dest is not None:
+            manifest_file = custom_dest / ".canvasctl-manifest.json"
+        else:
+            manifest_file = course_manifest_path(dest_root, course_slug)
+
+        existing_manifest = load_manifest(manifest_file)
         previous_by_file_id = index_items_by_file_id(existing_manifest)
 
-        tasks = plan_course_download_tasks(course, remote_files, dest_root=dest_root)
+        tasks = plan_course_download_tasks(
+            course, remote_files, dest_root=dest_root, course_dest=custom_dest,
+        )
         results = download_tasks(
             client,
             tasks,
@@ -312,7 +330,12 @@ def _download_for_courses(
             "completed_at": completed_at,
             "items": manifest_items,
         }
-        course_manifest = write_course_manifest(dest_root, course_slug, course_payload)
+
+        if custom_dest is not None:
+            write_manifest(manifest_file, course_payload)
+            course_manifest = manifest_file
+        else:
+            course_manifest = write_course_manifest(dest_root, course_slug, course_payload)
 
         counts = summarize_results(results)
         unresolved_count = len(warnings)
@@ -460,6 +483,47 @@ def config_show() -> None:
     """Show effective local config."""
     cfg = _load_config_or_fail()
     console.print(_render_config_table(cfg))
+
+
+@config_app.command("set-course-path")
+def config_set_course_path(
+    course_id: int = typer.Argument(..., help="Canvas course ID."),
+    path: Path = typer.Argument(..., help="Local directory for this course's downloads."),
+) -> None:
+    """Map a course to a specific download directory."""
+    try:
+        cfg = set_course_path(course_id, path)
+    except ConfigError as exc:
+        _fail(str(exc))
+    resolved = cfg.course_paths[str(course_id)] if cfg.course_paths else str(path)
+    console.print(f"[green]Saved course path for {course_id}:[/green] {resolved}")
+
+
+@config_app.command("clear-course-path")
+def config_clear_course_path(
+    course_id: int = typer.Argument(..., help="Canvas course ID."),
+) -> None:
+    """Remove a per-course download path mapping."""
+    try:
+        clear_course_path(course_id)
+    except ConfigError as exc:
+        _fail(str(exc))
+    console.print(f"[green]Cleared course path for {course_id}.[/green]")
+
+
+@config_app.command("show-course-paths")
+def config_show_course_paths() -> None:
+    """Show all per-course download path mappings."""
+    cfg = _load_config_or_fail()
+    if not cfg.course_paths:
+        console.print("No course paths configured.")
+        return
+    table = Table(title="Course Download Paths")
+    table.add_column("Course ID", style="cyan")
+    table.add_column("Path")
+    for cid, cpath in sorted(cfg.course_paths.items()):
+        table.add_row(cid, cpath)
+    console.print(table)
 
 
 @courses_app.command("list")
@@ -711,6 +775,7 @@ def download_run(
             force=resolved_overwrite,
             concurrency=resolved_concurrency,
             base_url=resolved_base_url,
+            course_paths=cfg.course_paths,
         )
 
     exit_code = _run_with_client(resolved_base_url, action)
@@ -772,6 +837,7 @@ def download_interactive(
             force=force,
             concurrency=resolved_concurrency,
             base_url=resolved_base_url,
+            course_paths=cfg.course_paths,
         )
 
     exit_code = _run_with_client(resolved_base_url, action)

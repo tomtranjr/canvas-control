@@ -265,6 +265,94 @@ def test_download_interactive_passes_selected_courses_and_sources(monkeypatch, t
     assert capture["force"] is True
 
 
+def test_download_run_uses_course_path_when_configured(monkeypatch, tmp_path):
+    runner = CliRunner()
+    capture: dict[str, object] = {}
+
+    course_dest = tmp_path / "my-class"
+    monkeypatch.setattr(
+        "canvasctl.cli._load_config_or_fail",
+        lambda: AppConfig(
+            base_url="https://canvas.test",
+            course_paths={"1631791": str(course_dest)},
+        ),
+    )
+    monkeypatch.setattr("canvasctl.cli._resolve_base_url_or_fail", lambda _cfg, _override: "https://canvas.test")
+    monkeypatch.setattr("canvasctl.cli._run_with_client", lambda _base_url, action: action(FakeClient()))
+
+    def fake_download_for_courses(**kwargs):
+        capture.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("canvasctl.cli._download_for_courses", fake_download_for_courses)
+
+    result = runner.invoke(app, ["download", "run", "--course", "1631791"])
+
+    assert result.exit_code == 0
+    assert capture["course_paths"] == {"1631791": str(course_dest)}
+
+
+def test_config_set_course_path_command(monkeypatch, tmp_path):
+    from canvasctl import config
+
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+    config.save_config(AppConfig())
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["config", "set-course-path", "1631791", str(tmp_path / "my-class")])
+
+    assert result.exit_code == 0
+    assert "Saved course path for 1631791" in result.output
+
+    loaded = config.load_config()
+    assert loaded.course_paths is not None
+    assert "1631791" in loaded.course_paths
+
+
+def test_config_clear_course_path_command(monkeypatch, tmp_path):
+    from canvasctl import config
+
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+    config.save_config(AppConfig())
+    config.set_course_path(1631791, tmp_path / "my-class")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["config", "clear-course-path", "1631791"])
+
+    assert result.exit_code == 0
+    assert "Cleared course path for 1631791" in result.output
+
+    loaded = config.load_config()
+    assert loaded.course_paths is None
+
+
+def test_config_show_course_paths_command(monkeypatch, tmp_path):
+    from canvasctl import config
+
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+    config.save_config(AppConfig(course_paths={"1631791": "/tmp/my-class"}))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["config", "show-course-paths"])
+
+    assert result.exit_code == 0
+    assert "1631791" in result.output
+    assert "/tmp/my-class" in result.output
+
+
+def test_config_show_course_paths_empty(monkeypatch, tmp_path):
+    from canvasctl import config
+
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+    config.save_config(AppConfig())
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["config", "show-course-paths"])
+
+    assert result.exit_code == 0
+    assert "No course paths configured." in result.output
+
+
 def test_download_interactive_fails_when_no_valid_courses_selected(monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr("canvasctl.cli._load_config_or_fail", lambda: AppConfig(base_url="https://canvas.test"))
