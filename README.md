@@ -22,6 +22,11 @@ Instead of clicking through files one-by-one, you can:
 - [Configuration deep-dive](#configuration-deep-dive)
 - [Interactive mode](#interactive-mode)
 - [Resume failed downloads](#resume-failed-downloads)
+- [MCP server (AI assistants)](#mcp-server-ai-assistants)
+  - [Start the server manually](#start-the-server-manually)
+  - [Claude Desktop](#claude-desktop)
+  - [Claude Code](#claude-code)
+  - [Example prompts](#example-prompts)
 - [Health check](#health-check)
 - [Command reference](#command-reference)
 - [Troubleshooting](#troubleshooting)
@@ -257,6 +262,52 @@ cvsctl download resume --manifest /path/to/.canvasctl-runs/<run-id>.json
 
 This is ideal for flaky networks or large course downloads.
 
+## MCP server (AI assistants)
+
+`canvas-control` includes an MCP (Model Context Protocol) server so you can interact with Canvas through AI assistants like Claude Desktop and Claude Code using natural language.
+
+Available tools: `list_courses`, `get_upcoming_assignments`, `get_announcements`, `get_calendar_events`, `get_syllabus`, `get_grades_summary`, `get_grades_detailed`, `list_course_files`, `download_file`.
+
+### Start the server manually
+
+```bash
+CANVAS_TOKEN=your-token CANVAS_BASE_URL=https://your-school.instructure.com uv run cvsctl mcp serve
+```
+
+### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "canvas": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/canvas-control", "run", "cvsctl", "mcp", "serve"],
+      "env": {
+        "CANVAS_TOKEN": "your-token",
+        "CANVAS_BASE_URL": "https://your-school.instructure.com"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude mcp add canvas -- uv --directory /path/to/canvas-control run cvsctl mcp serve
+```
+
+Set the required environment variables (`CANVAS_TOKEN`, `CANVAS_BASE_URL`) in your shell profile or `.envrc`.
+
+### Example prompts
+
+- "What classes am I taking?"
+- "What assignments are due this week?"
+- "Show my grades for Biology"
+- "Are there any new announcements?"
+
 ## Health check
 
 Use the health check before your first download, after rotating credentials, or when you suspect auth/config issues:
@@ -289,9 +340,12 @@ Current command tree:
 - `cvsctl config clear-download-path`
 - `cvsctl config show`
 - `cvsctl courses list [--all] [--json] [--base-url <url>]`
+- `cvsctl grades summary [--all] [--detailed] [--json] [--course <id-or-code>...]`
+- `cvsctl grades export [--format csv|json] [--detailed] [--dest <path>] [--course <id-or-code>...]`
 - `cvsctl download run --course <id-or-code>... [--source <source>...] [--dest <path>] [--export-dest] [--overwrite <bool>] [--force] [--concurrency <n>] [--base-url <url>]`
 - `cvsctl download interactive [--dest <path>] [--export-dest] [--base-url <url>] [--concurrency <n>] [--force]`
 - `cvsctl download resume --manifest <path>`
+- `cvsctl mcp serve`
 
 Available `--source` values:
 
