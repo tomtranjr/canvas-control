@@ -72,6 +72,48 @@ class AssignmentGrade:
     workflow_state: str | None
 
 
+@dataclass(slots=True)
+class UpcomingAssignment:
+    """Assignment with due-date and submission info for upcoming views."""
+
+    assignment_id: int
+    assignment_name: str
+    course_id: int
+    course_name: str
+    due_at: str | None
+    lock_at: str | None
+    unlock_at: str | None
+    points_possible: float | None
+    submission_types: list[str]
+    has_submitted: bool
+    html_url: str | None
+
+
+@dataclass(slots=True)
+class Announcement:
+    """Course announcement."""
+
+    id: int
+    title: str
+    message: str
+    course_id: int
+    posted_at: str | None
+    author_name: str | None
+
+
+@dataclass(slots=True)
+class CalendarEvent:
+    """Calendar event from Canvas."""
+
+    id: int
+    title: str
+    description: str | None
+    start_at: str | None
+    end_at: str | None
+    event_type: str | None
+    context_name: str | None
+
+
 class CanvasClient:
     def __init__(
         self,
@@ -395,6 +437,111 @@ class CanvasClient:
 
     def download_file(self, url: str, destination: Path) -> tuple[int, str, str | None]:
         return self._stream_download_to_file(url, destination)
+
+    def list_upcoming_assignments(self, course_id: int) -> list[UpcomingAssignment]:
+        course_data = self.get_json(f"/courses/{course_id}")
+        course_name = course_data.get("name") or ""
+
+        raw = self.get_paginated(
+            f"/courses/{course_id}/assignments",
+            params={
+                "per_page": 100,
+                "include[]": ["submission"],
+                "order_by": "due_at",
+            },
+        )
+        assignments: list[UpcomingAssignment] = []
+        for item in raw:
+            submission = item.get("submission") or {}
+            has_submitted = submission.get("workflow_state") not in (
+                None,
+                "unsubmitted",
+            )
+            assignments.append(
+                UpcomingAssignment(
+                    assignment_id=int(item["id"]),
+                    assignment_name=item.get("name") or "",
+                    course_id=course_id,
+                    course_name=course_name,
+                    due_at=item.get("due_at"),
+                    lock_at=item.get("lock_at"),
+                    unlock_at=item.get("unlock_at"),
+                    points_possible=item.get("points_possible"),
+                    submission_types=item.get("submission_types") or [],
+                    has_submitted=has_submitted,
+                    html_url=item.get("html_url"),
+                )
+            )
+        return assignments
+
+    def list_announcements(self, course_ids: list[int]) -> list[Announcement]:
+        context_codes = [f"course_{cid}" for cid in course_ids]
+        raw = self.get_paginated(
+            "/announcements",
+            params={
+                "context_codes[]": context_codes,
+                "per_page": 50,
+            },
+        )
+        announcements: list[Announcement] = []
+        for item in raw:
+            # Extract course_id from context_code like "course_12345"
+            context_code = item.get("context_code") or ""
+            course_id = 0
+            if context_code.startswith("course_"):
+                try:
+                    course_id = int(context_code[len("course_"):])
+                except ValueError:
+                    pass
+            author = item.get("author") or {}
+            announcements.append(
+                Announcement(
+                    id=int(item["id"]),
+                    title=item.get("title") or "",
+                    message=item.get("message") or "",
+                    course_id=course_id,
+                    posted_at=item.get("posted_at"),
+                    author_name=author.get("display_name"),
+                )
+            )
+        return announcements
+
+    def list_calendar_events(
+        self,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        context_codes: list[str] | None = None,
+    ) -> list[CalendarEvent]:
+        params: dict[str, Any] = {"per_page": 50}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        if context_codes:
+            params["context_codes[]"] = context_codes
+
+        raw = self.get_paginated("/calendar_events", params=params)
+        events: list[CalendarEvent] = []
+        for item in raw:
+            events.append(
+                CalendarEvent(
+                    id=int(item["id"]),
+                    title=item.get("title") or "",
+                    description=item.get("description"),
+                    start_at=item.get("start_at"),
+                    end_at=item.get("end_at"),
+                    event_type=item.get("type"),
+                    context_name=item.get("context_name"),
+                )
+            )
+        return events
+
+    def get_course_syllabus(self, course_id: int) -> dict[str, Any]:
+        return self.get_json(
+            f"/courses/{course_id}",
+            params={"include[]": "syllabus_body"},
+        )
 
 
 def dedupe_courses(courses: Iterable[CourseSummary]) -> list[CourseSummary]:
