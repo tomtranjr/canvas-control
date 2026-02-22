@@ -11,6 +11,10 @@ Instead of clicking through files one-by-one, you can:
 - use interactive prompts when you want guidance
 - generate manifests so failed downloads can be resumed
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=tomtranjr/canvas-control&type=date&legend=top-left)](https://www.star-history.com/#tomtranjr/canvas-control&type=date&legend=top-left)
+
 ## Table of contents
 
 - [Why canvas-control is powerful](#why-canvas-control-is-powerful)
