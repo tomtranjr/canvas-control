@@ -72,10 +72,13 @@ courses_app = typer.Typer(help="List and inspect courses")
 download_app = typer.Typer(help="Download course files")
 grades_app = typer.Typer(help="View course grades")
 
+mcp_app = typer.Typer(help="MCP server commands")
+
 app.add_typer(config_app, name="config")
 app.add_typer(courses_app, name="courses")
 app.add_typer(download_app, name="download")
 app.add_typer(grades_app, name="grades")
+app.add_typer(mcp_app, name="mcp")
 
 console = Console()
 
@@ -843,6 +846,14 @@ def download_resume(
     exit_code = _run_with_client(base_url, action)
     if exit_code:
         raise typer.Exit(code=exit_code)
+
+
+@mcp_app.command("serve")
+def mcp_serve() -> None:
+    """Start the Canvas MCP server (STDIO transport)."""
+    from canvasctl.mcp_server import main as mcp_main
+
+    mcp_main()
 
 
 def main() -> None:
