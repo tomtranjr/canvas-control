@@ -79,6 +79,72 @@ def test_save_config_omits_none_values(tmp_path, monkeypatch):
     assert "default_dest" not in text
 
 
+def test_course_paths_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+
+    cfg = config.AppConfig(
+        base_url="https://school.example.edu",
+        default_concurrency=12,
+        course_paths={"1631791": str(tmp_path / "MSDS-697"), "2000000": str(tmp_path / "MSDS-610")},
+    )
+    config.save_config(cfg)
+
+    loaded = config.load_config()
+    assert loaded.course_paths is not None
+    assert loaded.course_paths["1631791"] == str(tmp_path / "MSDS-697")
+    assert loaded.course_paths["2000000"] == str(tmp_path / "MSDS-610")
+
+
+def test_set_course_path_persists(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+    config.save_config(config.AppConfig())
+
+    cfg = config.set_course_path(1631791, tmp_path / "my-class")
+
+    assert cfg.course_paths is not None
+    assert cfg.course_paths["1631791"] == str((tmp_path / "my-class").resolve())
+
+    loaded = config.load_config()
+    assert loaded.course_paths is not None
+    assert loaded.course_paths["1631791"] == str((tmp_path / "my-class").resolve())
+
+
+def test_clear_course_path_removes_mapping(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+    config.save_config(config.AppConfig())
+
+    config.set_course_path(1631791, tmp_path / "my-class")
+    cfg = config.clear_course_path(1631791)
+
+    assert cfg.course_paths is None
+
+    loaded = config.load_config()
+    assert loaded.course_paths is None
+
+
+def test_get_course_path_returns_none_for_unmapped():
+    cfg = config.AppConfig(course_paths={"1631791": "/some/path"})
+    assert config.get_course_path(9999, cfg) is None
+    assert config.get_course_path(1631791, cfg) == Path("/some/path")
+
+    empty_cfg = config.AppConfig()
+    assert config.get_course_path(1631791, empty_cfg) is None
+
+
+def test_save_config_omits_empty_course_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
+
+    cfg = config.AppConfig(
+        base_url="https://usfca.instructure.com",
+        default_concurrency=12,
+        course_paths=None,
+    )
+    config.save_config(cfg)
+
+    text = config.config_path().read_text(encoding="utf-8")
+    assert "course_paths" not in text
+
+
 def test_load_config_rejects_empty_default_dest(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "config_dir", lambda: Path(tmp_path))
 
