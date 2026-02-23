@@ -5,6 +5,7 @@
 - **Download** files from multiple Canvas content sources in one command
 - **Sync** course files like `git pull` — skip unchanged, re-download on demand
 - **Check grades** across all courses from the terminal or export to CSV/JSON
+- **Submit assignments** from the terminal (file upload, text entry, URL)
 - **Talk to Canvas** through AI assistants (Claude Desktop, Cursor, Claude Code) using natural language
 
 ## Star History
@@ -159,6 +160,12 @@ Guided interactive download:
 
 ```bash
 cvsctl download interactive
+```
+
+Submit an assignment:
+
+```bash
+cvsctl assignments submit --course 12345 --assignment "Homework 1" --file ./solution.py
 ```
 
 See [CLI Reference](docs/cli-reference.md) for the full command tree and all options.

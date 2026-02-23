@@ -164,12 +164,22 @@ class CanvasClient:
         path_or_url: str,
         *,
         params: dict[str, Any] | None = None,
+        data: Any = None,
+        json: Any = None,
+        files: Any = None,
     ) -> httpx.Response:
         target = self._normalize_request_target(path_or_url)
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                response = self._client.request(method, target, params=params)
+                response = self._client.request(
+                    method,
+                    target,
+                    params=params,
+                    data=data,
+                    json=json,
+                    files=files,
+                )
             except httpx.TransportError as exc:
                 last_error = exc
                 if attempt >= self.max_retries:
@@ -267,6 +277,46 @@ class CanvasClient:
         params: dict[str, Any] | None = None,
     ) -> Any:
         response = self._request("GET", path_or_url, params=params)
+        return response.json()
+
+    def post_json(
+        self,
+        path_or_url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        data: Any = None,
+        json: Any = None,
+        files: Any = None,
+    ) -> Any:
+        response = self._request(
+            "POST",
+            path_or_url,
+            params=params,
+            data=data,
+            json=json,
+            files=files,
+        )
+        if not response.content:
+            return {}
+        return response.json()
+
+    def put_json(
+        self,
+        path_or_url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        data: Any = None,
+        json: Any = None,
+    ) -> Any:
+        response = self._request(
+            "PUT",
+            path_or_url,
+            params=params,
+            data=data,
+            json=json,
+        )
+        if not response.content:
+            return {}
         return response.json()
 
     def get_paginated(
@@ -428,6 +478,86 @@ class CanvasClient:
             f"/courses/{course_id}/modules",
             params={"per_page": 100, "include[]": ["items"]},
         )
+
+    def list_course_modules_with_items(self, course_id: int) -> list[dict[str, Any]]:
+        return self.list_modules(course_id)
+
+    def mark_module_item_done(
+        self,
+        course_id: int,
+        module_id: int,
+        module_item_id: int,
+    ) -> dict[str, Any]:
+        payload = self.put_json(
+            f"/courses/{course_id}/modules/{module_id}/items/{module_item_id}/done",
+        )
+        if not isinstance(payload, dict):
+            return {"result": payload}
+        return payload
+
+    def submit_assignment(
+        self,
+        course_id: int,
+        assignment_id: int,
+        *,
+        submission_type: str,
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        form_data: dict[str, Any] = {
+            "submission[submission_type]": submission_type,
+        }
+        for key, value in body.items():
+            if key == "file_ids" and isinstance(value, list):
+                form_data["submission[file_ids][]"] = [str(file_id) for file_id in value]
+                continue
+            form_data[f"submission[{key}]"] = str(value)
+
+        payload = self.post_json(
+            f"/courses/{course_id}/assignments/{assignment_id}/submissions",
+            data=form_data,
+        )
+        if not isinstance(payload, dict):
+            return {"result": payload}
+        return payload
+
+    def init_assignment_file_upload(
+        self,
+        course_id: int,
+        assignment_id: int,
+        *,
+        filename: str,
+        size: int,
+    ) -> dict[str, Any]:
+        payload = self.post_json(
+            f"/courses/{course_id}/assignments/{assignment_id}/submissions/self/files",
+            data={
+                "name": filename,
+                "size": str(size),
+            },
+        )
+        if not isinstance(payload, dict):
+            raise CanvasApiError("Unexpected file upload init response from Canvas.")
+        return payload
+
+    def upload_file_to_canvas(
+        self,
+        upload_url: str,
+        upload_params: dict[str, Any],
+        local_path: Path,
+    ) -> dict[str, Any]:
+        if not local_path.is_file():
+            raise CanvasApiError(f"File not found for upload: {local_path}")
+
+        with local_path.open("rb") as handle:
+            payload = self.post_json(
+                upload_url,
+                data=upload_params,
+                files={"file": (local_path.name, handle)},
+            )
+
+        if not isinstance(payload, dict):
+            raise CanvasApiError("Unexpected file upload response from Canvas.")
+        return payload
 
     def get_file(self, file_id: int) -> dict[str, Any]:
         payload = self.get_json(f"/files/{file_id}")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import respx
 
@@ -241,3 +243,124 @@ def test_list_announcements_pagination(monkeypatch):
     assert len(announcements) == 2
     assert announcements[0].id == 10
     assert announcements[1].id == 11
+
+
+def test_list_course_modules_with_items(monkeypatch):
+    monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://canvas.test/api/v1/courses/100/modules").respond(
+            200,
+            json=[{"id": 1, "name": "Week 1", "items": []}],
+        )
+
+        with CanvasClient("https://canvas.test", "token") as client:
+            modules = client.list_course_modules_with_items(100)
+
+    assert modules[0]["id"] == 1
+    assert modules[0]["name"] == "Week 1"
+
+
+def test_mark_module_item_done(monkeypatch):
+    monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.put("https://canvas.test/api/v1/courses/100/modules/5/items/55/done").respond(
+            200,
+            json={"done": True},
+        )
+
+        with CanvasClient("https://canvas.test", "token") as client:
+            result = client.mark_module_item_done(100, 5, 55)
+
+    assert result["done"] is True
+
+
+def test_submit_assignment_online_text_entry(monkeypatch):
+    monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
+
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(
+            "https://canvas.test/api/v1/courses/100/assignments/10/submissions"
+        ).respond(
+            200,
+            json={"id": 999, "workflow_state": "submitted"},
+        )
+
+        with CanvasClient("https://canvas.test", "token") as client:
+            payload = client.submit_assignment(
+                100,
+                10,
+                submission_type="online_text_entry",
+                body={"body": "hello"},
+            )
+
+    assert payload["workflow_state"] == "submitted"
+    body = route.calls[0].request.content.decode("utf-8")
+    assert "submission%5Bsubmission_type%5D=online_text_entry" in body
+    assert "submission%5Bbody%5D=hello" in body
+
+
+def test_submit_assignment_online_upload(monkeypatch):
+    monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
+
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(
+            "https://canvas.test/api/v1/courses/100/assignments/10/submissions"
+        ).respond(
+            200,
+            json={"id": 1001, "workflow_state": "submitted"},
+        )
+
+        with CanvasClient("https://canvas.test", "token") as client:
+            payload = client.submit_assignment(
+                100,
+                10,
+                submission_type="online_upload",
+                body={"file_ids": [11, 12]},
+            )
+
+    assert payload["id"] == 1001
+    body = route.calls[0].request.content.decode("utf-8")
+    assert "submission%5Bfile_ids%5D%5B%5D=11" in body
+    assert "submission%5Bfile_ids%5D%5B%5D=12" in body
+
+
+def test_assignment_file_upload_flow(monkeypatch, tmp_path):
+    monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
+
+    local = tmp_path / "submission.py"
+    local.write_text("print('hello')\n", encoding="utf-8")
+
+    with respx.mock(assert_all_called=True) as router:
+        router.post(
+            "https://canvas.test/api/v1/courses/100/assignments/10/submissions/self/files"
+        ).respond(
+            200,
+            json={
+                "upload_url": "https://uploads.canvas.test/upload",
+                "upload_params": {"key": "abc"},
+            },
+        )
+        upload_route = router.post("https://uploads.canvas.test/upload").respond(
+            200,
+            json={"id": 12345, "display_name": "submission.py"},
+        )
+
+        with CanvasClient("https://canvas.test", "token") as client:
+            init = client.init_assignment_file_upload(
+                100,
+                10,
+                filename=local.name,
+                size=local.stat().st_size,
+            )
+            uploaded = client.upload_file_to_canvas(
+                init["upload_url"],
+                init["upload_params"],
+                Path(local),
+            )
+
+    assert init["upload_url"] == "https://uploads.canvas.test/upload"
+    assert uploaded["id"] == 12345
+    upload_body = upload_route.calls[0].request.content.decode("latin1")
+    assert "submission.py" in upload_body
