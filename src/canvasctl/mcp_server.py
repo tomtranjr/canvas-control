@@ -5,23 +5,43 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import Context, FastMCP
+from rich.console import Console
 
-from canvasctl.canvas_api import CanvasClient
-from canvasctl.config import load_config
+from canvasctl.canvas_api import CanvasClient, CourseSummary
+from canvasctl.config import AppConfig, get_course_path, load_config
+from canvasctl.downloader import (
+    build_course_slug,
+    download_tasks,
+    plan_course_download_tasks,
+    result_to_manifest_item,
+    summarize_results,
+)
+from canvasctl.manifest import (
+    course_manifest_path,
+    index_items_by_file_id,
+    load_manifest,
+    write_course_manifest,
+    write_manifest,
+)
+from canvasctl.sources import collect_remote_files_for_course, normalize_sources, warning_to_manifest_item
 
 
 @dataclass
 class AppContext:
     client: CanvasClient
     base_url: str
+    config: AppConfig
+    timezone: ZoneInfo | None = None
 
 
 @asynccontextmanager
@@ -33,22 +53,26 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             "Set it to your Canvas API access token."
         )
 
-    base_url = os.environ.get("CANVAS_BASE_URL", "")
-    if not base_url:
-        try:
-            cfg = load_config()
-            base_url = cfg.base_url or ""
-        except Exception:
-            pass
+    try:
+        cfg = load_config()
+    except Exception:
+        cfg = AppConfig()
+
+    base_url = os.environ.get("CANVAS_BASE_URL", "") or (cfg.base_url or "")
     if not base_url:
         raise RuntimeError(
             "CANVAS_BASE_URL environment variable or config base_url is required. "
             "Set it to your Canvas instance URL (e.g. https://school.instructure.com)."
         )
 
+    tz: ZoneInfo | None = None
+    tz_name = os.environ.get("CANVAS_TIMEZONE", "")
+    if tz_name:
+        tz = ZoneInfo(tz_name)
+
     client = CanvasClient(base_url, token)
     try:
-        yield AppContext(client=client, base_url=base_url)
+        yield AppContext(client=client, base_url=base_url, config=cfg, timezone=tz)
     finally:
         client.close()
 
@@ -70,6 +94,27 @@ def _strip_html(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _convert_tz(iso_str: str | None, tz: ZoneInfo) -> str | None:
+    """Convert an ISO 8601 UTC timestamp to the target timezone."""
+    if iso_str is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return dt.astimezone(tz).isoformat()
+    except (ValueError, TypeError):
+        return iso_str
+
+
+def _localize_dates(
+    obj: dict[str, Any], tz: ZoneInfo, keys: tuple[str, ...]
+) -> dict[str, Any]:
+    """Convert specified date keys in a dict to the target timezone."""
+    for key in keys:
+        if key in obj:
+            obj[key] = _convert_tz(obj[key], tz)
+    return obj
+
+
 def _get_active_course_ids(client: CanvasClient) -> list[int]:
     courses = client.list_courses(include_all=False)
     return [c.id for c in courses]
@@ -85,7 +130,11 @@ def list_courses(ctx: Context, include_all: bool = False) -> str:
     try:
         app = _get_ctx(ctx)
         courses = app.client.list_courses(include_all=include_all)
-        return _json([asdict(c) for c in courses])
+        items = [asdict(c) for c in courses]
+        if app.timezone:
+            for item in items:
+                _localize_dates(item, app.timezone, ("start_at", "end_at"))
+        return _json(items)
     except Exception as exc:
         return _json({"error": str(exc)})
 
@@ -120,7 +169,10 @@ def get_upcoming_assignments(
                 except ValueError:
                     continue
                 if due > now and due <= cutoff:
-                    results.append(asdict(a))
+                    d = asdict(a)
+                    if app.timezone:
+                        _localize_dates(d, app.timezone, ("due_at", "lock_at", "unlock_at"))
+                    results.append(d)
 
         results.sort(key=lambda x: x.get("due_at") or "")
         return _json(results)
@@ -148,6 +200,9 @@ def get_announcements(
 
         announcements = app.client.list_announcements(course_ids)
         items = [asdict(a) for a in announcements[:limit]]
+        if app.timezone:
+            for item in items:
+                _localize_dates(item, app.timezone, ("posted_at",))
         return _json(items)
     except Exception as exc:
         return _json({"error": str(exc)})
@@ -181,7 +236,11 @@ def get_calendar_events(
             end_date=end_date,
             context_codes=context_codes,
         )
-        return _json([asdict(e) for e in events])
+        items = [asdict(e) for e in events]
+        if app.timezone:
+            for item in items:
+                _localize_dates(item, app.timezone, ("start_at", "end_at"))
+        return _json(items)
     except Exception as exc:
         return _json({"error": str(exc)})
 
@@ -235,7 +294,11 @@ def get_grades_detailed(ctx: Context, course_id: int) -> str:
     try:
         app = _get_ctx(ctx)
         grades = app.client.list_assignment_grades(course_id)
-        return _json([asdict(g) for g in grades])
+        items = [asdict(g) for g in grades]
+        if app.timezone:
+            for item in items:
+                _localize_dates(item, app.timezone, ("submitted_at",))
+        return _json(items)
     except Exception as exc:
         return _json({"error": str(exc)})
 
@@ -287,6 +350,120 @@ def download_file(
             "destination": str(dest_path),
             "bytes_written": bytes_written,
             "sha256": sha256,
+        })
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+def _find_course(client: CanvasClient, course_id: int) -> CourseSummary | None:
+    courses = client.list_courses(include_all=True)
+    for c in courses:
+        if c.id == course_id:
+            return c
+    return None
+
+
+@mcp.tool()
+def sync_course_files(
+    ctx: Context,
+    course_id: int,
+    force: bool = False,
+    sources: list[str] | None = None,
+) -> str:
+    """Sync (download) all files for a Canvas course to the local filesystem.
+
+    Behaves like "git pull" for course files — downloads new/changed files and
+    skips unchanged ones. Set force=True to re-download everything.
+
+    Args:
+        course_id: The Canvas course ID to sync.
+        force: If True, overwrite existing files even if unchanged.
+        sources: Content sources to include. Defaults to all
+                 (files, assignments, discussions, pages, modules).
+    """
+    try:
+        app = _get_ctx(ctx)
+        cfg = app.config
+
+        course = _find_course(app.client, course_id)
+        if course is None:
+            return _json({"error": f"Course {course_id} not found."})
+
+        selected_sources = normalize_sources(sources)
+
+        custom_dest = get_course_path(course_id, cfg)
+        dest_root = cfg.destination_path()
+
+        remote_files, warnings = collect_remote_files_for_course(
+            app.client, course_id, selected_sources,
+        )
+
+        if not remote_files and not warnings:
+            return _json({
+                "course_id": course_id,
+                "course_name": course.name,
+                "message": "No files found for this course.",
+            })
+
+        course_slug = build_course_slug(course)
+
+        if custom_dest is not None:
+            manifest_file = custom_dest / ".canvasctl-manifest.json"
+        else:
+            manifest_file = course_manifest_path(dest_root, course_slug)
+
+        existing_manifest = load_manifest(manifest_file)
+        previous_by_file_id = index_items_by_file_id(existing_manifest)
+
+        tasks = plan_course_download_tasks(
+            course, remote_files, dest_root=dest_root, course_dest=custom_dest,
+        )
+
+        results = download_tasks(
+            app.client,
+            tasks,
+            previous_items_by_file_id=previous_by_file_id,
+            force=force,
+            concurrency=cfg.default_concurrency,
+            console=Console(quiet=True),
+        )
+
+        manifest_items = [result_to_manifest_item(r) for r in results]
+        manifest_items.extend(
+            warning_to_manifest_item(w, course_id=course_id) for w in warnings
+        )
+
+        run_id = str(uuid.uuid4())
+        now = datetime.now(UTC).isoformat()
+        course_payload = {
+            "run_id": run_id,
+            "base_url": app.base_url,
+            "course_id": course_id,
+            "sources": selected_sources,
+            "started_at": now,
+            "completed_at": now,
+            "items": manifest_items,
+        }
+
+        if custom_dest is not None:
+            write_manifest(manifest_file, course_payload)
+        else:
+            write_course_manifest(dest_root, course_slug, course_payload)
+
+        counts = summarize_results(results)
+        destination = str(custom_dest) if custom_dest is not None else str(dest_root / course_slug)
+
+        return _json({
+            "course_id": course_id,
+            "course_name": course.name,
+            "destination": destination,
+            "downloaded": counts["downloaded"],
+            "skipped": counts["skipped"],
+            "failed": counts["failed"],
+            "warnings": len(warnings),
+            "total_files": len(remote_files),
+            "sources": selected_sources,
+            "force": force,
         })
     except Exception as exc:
         return _json({"error": str(exc)})
