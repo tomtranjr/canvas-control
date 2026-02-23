@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 import typer
 from rich.console import Console
@@ -75,6 +75,7 @@ config_app = typer.Typer(help="Manage local cvsctl config")
 courses_app = typer.Typer(help="List and inspect courses")
 download_app = typer.Typer(help="Download course files")
 grades_app = typer.Typer(help="View course grades")
+assignments_app = typer.Typer(help="Submit assignments")
 
 mcp_app = typer.Typer(help="MCP server commands")
 
@@ -82,6 +83,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(courses_app, name="courses")
 app.add_typer(download_app, name="download")
 app.add_typer(grades_app, name="grades")
+app.add_typer(assignments_app, name="assignments")
 app.add_typer(mcp_app, name="mcp")
 
 console = Console()
@@ -243,6 +245,41 @@ def _resolve_courses_from_selectors(
             selected.append(course)
 
     return selected
+
+
+def _resolve_assignment_from_selector(
+    assignments: list[dict[str, Any]],
+    selector: str,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    stripped = selector.strip()
+    if stripped.isdigit():
+        assignment_id = int(stripped)
+        for assignment in assignments:
+            if assignment.get("id") == assignment_id:
+                return assignment, []
+        return None, []
+
+    normalized = stripped.casefold()
+    exact = [
+        assignment
+        for assignment in assignments
+        if str(assignment.get("name") or "").strip().casefold() == normalized
+    ]
+    if len(exact) == 1:
+        return exact[0], []
+    if len(exact) > 1:
+        return None, exact
+
+    partial = [
+        assignment
+        for assignment in assignments
+        if normalized in str(assignment.get("name") or "").strip().casefold()
+    ]
+    if len(partial) == 1:
+        return partial[0], []
+    if len(partial) > 1:
+        return None, partial
+    return None, []
 
 
 def _render_config_table(cfg: AppConfig) -> Table:
@@ -709,6 +746,193 @@ def grades_export(
             written = export_grades_csv(all_grades, assignments_by_course, file_path)
 
         console.print(f"[green]Exported grades to:[/green] {written}")
+        return 0
+
+    _run_with_client(resolved_base_url, action)
+
+
+@assignments_app.command("submit")
+def assignments_submit(
+    course_selector: str = typer.Option(
+        ...,
+        "--course",
+        "-c",
+        help="Course ID or course code.",
+    ),
+    assignment_selector: str = typer.Option(
+        ...,
+        "--assignment",
+        "-a",
+        help="Assignment ID or assignment name.",
+    ),
+    file_paths: list[Path] | None = typer.Option(
+        None,
+        "--file",
+        help="Absolute or relative path to local file. Repeat for multiple files.",
+    ),
+    text_submission: str | None = typer.Option(
+        None,
+        "--text",
+        help="Submission body for online_text_entry assignments.",
+    ),
+    url_submission: str | None = typer.Option(
+        None,
+        "--url",
+        help="Submission URL for online_url assignments.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON output."),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Canvas instance URL override."
+    ),
+) -> None:
+    """Submit a Canvas assignment."""
+    cfg = _load_config_or_fail()
+    resolved_base_url = _resolve_base_url_or_fail(cfg, base_url)
+
+    def action(client: CanvasClient) -> int:
+        courses = sort_courses(client.list_courses(include_all=True))
+        selected_courses = _resolve_courses_from_selectors(courses, [course_selector])
+        if len(selected_courses) != 1:
+            _fail(f"Expected exactly one course for selector {course_selector!r}.")
+        course = selected_courses[0]
+
+        assignments = client.list_assignments(course.id)
+        assignment, ambiguous = _resolve_assignment_from_selector(
+            assignments, assignment_selector
+        )
+        if ambiguous:
+            table = Table(title="Ambiguous assignment selector")
+            table.add_column("Assignment ID", style="cyan")
+            table.add_column("Assignment Name")
+            table.add_column("Due At")
+            table.add_column("URL")
+            for item in ambiguous:
+                table.add_row(
+                    str(item.get("id") or ""),
+                    str(item.get("name") or ""),
+                    str(item.get("due_at") or ""),
+                    str(item.get("html_url") or ""),
+                )
+            console.print(table)
+            _fail(
+                "Assignment selector matched multiple assignments. "
+                "Re-run with --assignment <id>."
+            )
+        if assignment is None:
+            _fail(f"Assignment selector {assignment_selector!r} did not match this course.")
+
+        submission_inputs = sum(
+            1 for value in (file_paths, text_submission, url_submission) if value
+        )
+        if submission_inputs == 0:
+            _fail("One submission input is required: --file, --text, or --url.")
+        if submission_inputs > 1:
+            _fail("Provide only one submission input type at a time.")
+
+        assignment_id = int(assignment["id"])
+        assignment_name = str(assignment.get("name") or "")
+        assignment_url = str(assignment.get("html_url") or "")
+        submission_types = [
+            str(item) for item in (assignment.get("submission_types") or [])
+        ]
+
+        if file_paths:
+            if "online_upload" not in submission_types:
+                if assignment_url:
+                    console.print(f"[yellow]Manual submission URL:[/yellow] {assignment_url}")
+                _fail(
+                    "This assignment does not accept file uploads. "
+                    f"Canvas submission_types: {submission_types}"
+                )
+
+            resolved_files: list[Path] = []
+            for raw_path in file_paths:
+                resolved = raw_path.expanduser().resolve()
+                if not resolved.is_file():
+                    _fail(f"File path does not exist or is not a file: {raw_path}")
+                resolved_files.append(resolved)
+
+            file_ids: list[int] = []
+            for local_path in resolved_files:
+                init_payload = client.init_assignment_file_upload(
+                    course.id,
+                    assignment_id,
+                    filename=local_path.name,
+                    size=local_path.stat().st_size,
+                )
+                upload_url = init_payload.get("upload_url")
+                upload_params = init_payload.get("upload_params") or {}
+                if not isinstance(upload_url, str) or not upload_url:
+                    _fail(f"Canvas did not provide upload_url for {local_path.name}.")
+                uploaded = client.upload_file_to_canvas(upload_url, upload_params, local_path)
+                uploaded_id = uploaded.get("id")
+                if not isinstance(uploaded_id, int):
+                    _fail(f"Canvas upload did not return a file id for {local_path.name}.")
+                file_ids.append(uploaded_id)
+
+            submission = client.submit_assignment(
+                course.id,
+                assignment_id,
+                submission_type="online_upload",
+                body={"file_ids": file_ids},
+            )
+            action_name = "submitted_online_upload"
+        elif text_submission:
+            if "online_text_entry" not in submission_types:
+                if assignment_url:
+                    console.print(f"[yellow]Manual submission URL:[/yellow] {assignment_url}")
+                _fail(
+                    "This assignment does not accept text entry submissions. "
+                    f"Canvas submission_types: {submission_types}"
+                )
+            submission = client.submit_assignment(
+                course.id,
+                assignment_id,
+                submission_type="online_text_entry",
+                body={"body": text_submission},
+            )
+            action_name = "submitted_online_text_entry"
+        else:
+            assert url_submission is not None
+            if "online_url" not in submission_types:
+                if assignment_url:
+                    console.print(f"[yellow]Manual submission URL:[/yellow] {assignment_url}")
+                _fail(
+                    "This assignment does not accept URL submissions. "
+                    f"Canvas submission_types: {submission_types}"
+                )
+            submission = client.submit_assignment(
+                course.id,
+                assignment_id,
+                submission_type="online_url",
+                body={"url": url_submission},
+            )
+            action_name = "submitted_online_url"
+
+        payload = {
+            "status": "completed",
+            "action_taken": action_name,
+            "course_id": course.id,
+            "course_name": course.name,
+            "assignment_id": assignment_id,
+            "assignment_name": assignment_name,
+            "url": assignment_url,
+            "submission": submission,
+        }
+        if json_output:
+            console.print(json.dumps(payload, indent=2))
+        else:
+            table = Table(title="Assignment Submission")
+            table.add_column("Field", style="cyan")
+            table.add_column("Value")
+            table.add_row("status", payload["status"])
+            table.add_row("action_taken", payload["action_taken"])
+            table.add_row("course_id", str(course.id))
+            table.add_row("assignment_id", str(assignment_id))
+            table.add_row("assignment_name", assignment_name)
+            if assignment_url:
+                table.add_row("url", assignment_url)
+            console.print(table)
         return 0
 
     _run_with_client(resolved_base_url, action)
