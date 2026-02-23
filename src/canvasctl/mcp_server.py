@@ -120,6 +120,131 @@ def _get_active_course_ids(client: CanvasClient) -> list[int]:
     return [c.id for c in courses]
 
 
+_AUTOMATED_SUBMISSION_TYPES = {"online_upload", "online_text_entry", "online_url"}
+
+
+def _normalize_assignment_name(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def _assignment_search_space(client: CanvasClient, course_ids: list[int]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for cid in course_ids:
+        for assignment in client.list_assignments(cid):
+            out.append(
+                {
+                    "course_id": cid,
+                    "assignment": assignment,
+                }
+            )
+    return out
+
+
+def _select_assignment(
+    records: list[dict[str, Any]],
+    *,
+    assignment_id: int | None,
+    assignment_name: str | None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
+    if assignment_id is not None:
+        matches = [item for item in records if int(item["assignment"].get("id", -1)) == assignment_id]
+    elif assignment_name:
+        needle = _normalize_assignment_name(assignment_name)
+        exact = [
+            item
+            for item in records
+            if _normalize_assignment_name(str(item["assignment"].get("name") or "")) == needle
+        ]
+        if exact:
+            matches = exact
+        else:
+            matches = [
+                item
+                for item in records
+                if needle in _normalize_assignment_name(str(item["assignment"].get("name") or ""))
+            ]
+    else:
+        return None, [], "Either assignment_id or assignment_name is required."
+
+    if not matches:
+        return None, [], "No matching assignment found."
+    if len(matches) > 1:
+        candidates: list[dict[str, Any]] = []
+        for match in matches:
+            assignment = match["assignment"]
+            candidates.append(
+                {
+                    "course_id": match["course_id"],
+                    "assignment_id": assignment.get("id"),
+                    "assignment_name": assignment.get("name"),
+                    "due_at": assignment.get("due_at"),
+                    "url": assignment.get("html_url"),
+                }
+            )
+        return None, candidates, "Assignment reference is ambiguous."
+    return matches[0], [], None
+
+
+def _build_complete_assignment_response(
+    *,
+    status: str,
+    action_taken: str,
+    course_id: int | None,
+    assignment_id: int | None,
+    assignment_name: str | None,
+    url: str | None,
+    next_step: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "status": status,
+        "action_taken": action_taken,
+        "course_id": course_id,
+        "assignment_id": assignment_id,
+        "assignment_name": assignment_name,
+        "url": url,
+        "next_step": next_step,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _resolve_module_item_for_assignment(
+    client: CanvasClient,
+    *,
+    course_id: int,
+    assignment_id: int,
+) -> tuple[int, int] | None:
+    modules = client.list_course_modules_with_items(course_id)
+    for module in modules:
+        module_id = module.get("id")
+        items = module.get("items") or []
+        if module_id is None or not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            content_id = item.get("content_id")
+            item_type = str(item.get("type") or "")
+            item_id = item.get("id")
+            if content_id == assignment_id and item_id is not None and item_type.lower() == "assignment":
+                return int(module_id), int(item_id)
+    return None
+
+
+def _validate_absolute_file_paths(raw_paths: list[str]) -> tuple[list[Path], str | None]:
+    files: list[Path] = []
+    for raw in raw_paths:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            return [], f"File path must be absolute: {raw}"
+        if not path.is_file():
+            return [], f"File path does not exist or is not a file: {raw}"
+        files.append(path)
+    return files, None
+
+
 @mcp.tool()
 def list_courses(ctx: Context, include_all: bool = False) -> str:
     """List Canvas courses. By default shows only active enrollments.
@@ -467,6 +592,313 @@ def sync_course_files(
         })
     except Exception as exc:
         return _json({"error": str(exc)})
+
+
+@mcp.tool()
+def complete_assignment(
+    ctx: Context,
+    assignment_name: str | None = None,
+    assignment_id: int | None = None,
+    course_id: int | None = None,
+    file_paths: list[str] | None = None,
+    text_submission: str | None = None,
+    url_submission: str | None = None,
+) -> str:
+    """Complete or submit an assignment in Canvas.
+
+    When online submission is available and no submission payload is provided,
+    this tool responds with `needs_input` and tells the caller what is required.
+    If no supported submission path exists, it attempts module item completion.
+    """
+    try:
+        app = _get_ctx(ctx)
+        course_ids = [course_id] if course_id else _get_active_course_ids(app.client)
+        if not course_ids:
+            return _json(
+                _build_complete_assignment_response(
+                    status="error",
+                    action_taken="none",
+                    course_id=None,
+                    assignment_id=assignment_id,
+                    assignment_name=assignment_name,
+                    url=None,
+                    next_step="No active courses were found.",
+                )
+            )
+
+        records = _assignment_search_space(app.client, course_ids)
+        selected, candidates, error = _select_assignment(
+            records,
+            assignment_id=assignment_id,
+            assignment_name=assignment_name,
+        )
+        if error:
+            status = "ambiguous" if candidates else "not_found"
+            return _json(
+                _build_complete_assignment_response(
+                    status=status,
+                    action_taken="none",
+                    course_id=course_id,
+                    assignment_id=assignment_id,
+                    assignment_name=assignment_name,
+                    url=None,
+                    next_step=error,
+                    extra={"candidates": candidates} if candidates else None,
+                )
+            )
+
+        assert selected is not None
+        assignment = selected["assignment"]
+        selected_course_id = int(selected["course_id"])
+        selected_assignment_id = int(assignment.get("id"))
+        selected_assignment_name = str(assignment.get("name") or "")
+        assignment_url = assignment.get("html_url")
+
+        provided_kinds = sum(
+            1 for value in (file_paths, text_submission, url_submission) if value
+        )
+        if provided_kinds > 1:
+            return _json(
+                _build_complete_assignment_response(
+                    status="error",
+                    action_taken="none",
+                    course_id=selected_course_id,
+                    assignment_id=selected_assignment_id,
+                    assignment_name=selected_assignment_name,
+                    url=assignment_url,
+                    next_step="Provide only one of: file_paths, text_submission, or url_submission.",
+                )
+            )
+
+        submission_types = [
+            str(item) for item in (assignment.get("submission_types") or [])
+        ]
+        automatable = sorted(
+            item for item in submission_types if item in _AUTOMATED_SUBMISSION_TYPES
+        )
+
+        if not file_paths and not text_submission and not url_submission and automatable:
+            return _json(
+                _build_complete_assignment_response(
+                    status="needs_input",
+                    action_taken="none",
+                    course_id=selected_course_id,
+                    assignment_id=selected_assignment_id,
+                    assignment_name=selected_assignment_name,
+                    url=assignment_url,
+                    next_step=(
+                        "Provide submission content to complete this assignment. "
+                        f"Supported for this assignment: {', '.join(automatable)}"
+                    ),
+                )
+            )
+
+        if file_paths:
+            if "online_upload" not in submission_types:
+                return _json(
+                    _build_complete_assignment_response(
+                        status="manual_action",
+                        action_taken="none",
+                        course_id=selected_course_id,
+                        assignment_id=selected_assignment_id,
+                        assignment_name=selected_assignment_name,
+                        url=assignment_url,
+                        next_step=(
+                            "This assignment does not accept file uploads. "
+                            f"Canvas submission_types: {submission_types}"
+                        ),
+                    )
+                )
+            resolved_paths, file_error = _validate_absolute_file_paths(file_paths)
+            if file_error:
+                return _json(
+                    _build_complete_assignment_response(
+                        status="error",
+                        action_taken="none",
+                        course_id=selected_course_id,
+                        assignment_id=selected_assignment_id,
+                        assignment_name=selected_assignment_name,
+                        url=assignment_url,
+                        next_step=file_error,
+                    )
+                )
+            file_ids: list[int] = []
+            for path in resolved_paths:
+                init_payload = app.client.init_assignment_file_upload(
+                    selected_course_id,
+                    selected_assignment_id,
+                    filename=path.name,
+                    size=path.stat().st_size,
+                )
+                upload_url = init_payload.get("upload_url")
+                upload_params = init_payload.get("upload_params") or {}
+                if not isinstance(upload_url, str) or not upload_url:
+                    return _json(
+                        _build_complete_assignment_response(
+                            status="error",
+                            action_taken="none",
+                            course_id=selected_course_id,
+                            assignment_id=selected_assignment_id,
+                            assignment_name=selected_assignment_name,
+                            url=assignment_url,
+                            next_step=f"Canvas did not provide upload_url for {path.name}.",
+                        )
+                    )
+                uploaded = app.client.upload_file_to_canvas(upload_url, upload_params, path)
+                uploaded_id = uploaded.get("id")
+                if not isinstance(uploaded_id, int):
+                    return _json(
+                        _build_complete_assignment_response(
+                            status="error",
+                            action_taken="none",
+                            course_id=selected_course_id,
+                            assignment_id=selected_assignment_id,
+                            assignment_name=selected_assignment_name,
+                            url=assignment_url,
+                            next_step=f"Canvas upload did not return a file id for {path.name}.",
+                        )
+                    )
+                file_ids.append(uploaded_id)
+            submission = app.client.submit_assignment(
+                selected_course_id,
+                selected_assignment_id,
+                submission_type="online_upload",
+                body={"file_ids": file_ids},
+            )
+            return _json(
+                _build_complete_assignment_response(
+                    status="completed",
+                    action_taken="submitted_online_upload",
+                    course_id=selected_course_id,
+                    assignment_id=selected_assignment_id,
+                    assignment_name=selected_assignment_name,
+                    url=assignment_url,
+                    extra={"submission": submission},
+                )
+            )
+
+        if text_submission:
+            if "online_text_entry" not in submission_types:
+                return _json(
+                    _build_complete_assignment_response(
+                        status="manual_action",
+                        action_taken="none",
+                        course_id=selected_course_id,
+                        assignment_id=selected_assignment_id,
+                        assignment_name=selected_assignment_name,
+                        url=assignment_url,
+                        next_step=(
+                            "This assignment does not accept text entry submissions. "
+                            f"Canvas submission_types: {submission_types}"
+                        ),
+                    )
+                )
+            submission = app.client.submit_assignment(
+                selected_course_id,
+                selected_assignment_id,
+                submission_type="online_text_entry",
+                body={"body": text_submission},
+            )
+            return _json(
+                _build_complete_assignment_response(
+                    status="completed",
+                    action_taken="submitted_online_text_entry",
+                    course_id=selected_course_id,
+                    assignment_id=selected_assignment_id,
+                    assignment_name=selected_assignment_name,
+                    url=assignment_url,
+                    extra={"submission": submission},
+                )
+            )
+
+        if url_submission:
+            if "online_url" not in submission_types:
+                return _json(
+                    _build_complete_assignment_response(
+                        status="manual_action",
+                        action_taken="none",
+                        course_id=selected_course_id,
+                        assignment_id=selected_assignment_id,
+                        assignment_name=selected_assignment_name,
+                        url=assignment_url,
+                        next_step=(
+                            "This assignment does not accept URL submissions. "
+                            f"Canvas submission_types: {submission_types}"
+                        ),
+                    )
+                )
+            submission = app.client.submit_assignment(
+                selected_course_id,
+                selected_assignment_id,
+                submission_type="online_url",
+                body={"url": url_submission},
+            )
+            return _json(
+                _build_complete_assignment_response(
+                    status="completed",
+                    action_taken="submitted_online_url",
+                    course_id=selected_course_id,
+                    assignment_id=selected_assignment_id,
+                    assignment_name=selected_assignment_name,
+                    url=assignment_url,
+                    extra={"submission": submission},
+                )
+            )
+
+        module_item = _resolve_module_item_for_assignment(
+            app.client,
+            course_id=selected_course_id,
+            assignment_id=selected_assignment_id,
+        )
+        if module_item:
+            module_id, module_item_id = module_item
+            done_payload = app.client.mark_module_item_done(
+                selected_course_id,
+                module_id,
+                module_item_id,
+            )
+            return _json(
+                _build_complete_assignment_response(
+                    status="completed",
+                    action_taken="marked_module_item_done",
+                    course_id=selected_course_id,
+                    assignment_id=selected_assignment_id,
+                    assignment_name=selected_assignment_name,
+                    url=assignment_url,
+                    extra={
+                        "module_id": module_id,
+                        "module_item_id": module_item_id,
+                        "result": done_payload,
+                    },
+                )
+            )
+
+        return _json(
+            _build_complete_assignment_response(
+                status="manual_action",
+                action_taken="none",
+                course_id=selected_course_id,
+                assignment_id=selected_assignment_id,
+                assignment_name=selected_assignment_name,
+                url=assignment_url,
+                next_step=(
+                    "No supported submission payload was provided and module completion "
+                    "was not available. Open the assignment URL to complete it manually."
+                ),
+            )
+        )
+    except Exception as exc:
+        return _json(
+            _build_complete_assignment_response(
+                status="error",
+                action_taken="none",
+                course_id=course_id,
+                assignment_id=assignment_id,
+                assignment_name=assignment_name,
+                url=None,
+                next_step=str(exc),
+            )
+        )
 
 
 def main() -> None:

@@ -77,6 +77,7 @@ cvsctl courses list
 | `get_grades_detailed` | Per-assignment grade breakdown |
 | `list_course_files` | List all files in a course |
 | `download_file` | Download a single file by ID |
+| `complete_assignment` | Mark assignment complete (submission or module completion flow) |
 | `sync_course_files` | Sync all course files to local disk (like `git pull`) |
 
 ### Claude Desktop
@@ -135,6 +136,7 @@ Set `CANVAS_TOKEN`, `CANVAS_BASE_URL`, and optionally `CANVAS_TIMEZONE` in your 
 - "Are there any new announcements?"
 - "Update my local canvas files for Time Series"
 - "Re-download all files for Biology with override"
+- "Mark Homework 2 complete"
 
 ## CLI highlights
 

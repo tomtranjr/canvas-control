@@ -29,6 +29,7 @@ from canvasctl.mcp_server import (
     _find_course,
     _localize_dates,
     _strip_html,
+    complete_assignment,
     download_file,
     get_announcements,
     get_calendar_events,
@@ -613,3 +614,180 @@ class TestSyncCourseFiles:
         mock_dl.assert_called_once()
         _, kwargs = mock_dl.call_args
         assert kwargs["force"] is True
+class TestCompleteAssignment:
+    def test_returns_ambiguous_matches(self):
+        client = MagicMock()
+        client.list_courses.return_value = [
+            CourseSummary(
+                id=100,
+                course_code="BIO101",
+                name="Biology",
+                workflow_state="available",
+                term_name=None,
+                start_at=None,
+                end_at=None,
+            ),
+            CourseSummary(
+                id=200,
+                course_code="CHEM101",
+                name="Chemistry",
+                workflow_state="available",
+                term_name=None,
+                start_at=None,
+                end_at=None,
+            ),
+        ]
+        client.list_assignments.side_effect = [
+            [{"id": 10, "name": "Homework 1", "submission_types": [], "html_url": "u1"}],
+            [{"id": 20, "name": "Homework 1", "submission_types": [], "html_url": "u2"}],
+        ]
+        ctx = _make_ctx(client)
+
+        result = json.loads(complete_assignment(ctx, assignment_name="Homework 1"))
+
+        assert result["status"] == "ambiguous"
+        assert len(result["candidates"]) == 2
+
+    def test_returns_needs_input_for_submission_assignments(self):
+        client = MagicMock()
+        client.list_courses.return_value = [
+            CourseSummary(
+                id=100,
+                course_code="BIO101",
+                name="Biology",
+                workflow_state="available",
+                term_name=None,
+                start_at=None,
+                end_at=None,
+            ),
+        ]
+        client.list_assignments.return_value = [
+            {
+                "id": 10,
+                "name": "Homework 1",
+                "submission_types": ["online_upload"],
+                "html_url": "https://canvas.test/courses/100/assignments/10",
+            }
+        ]
+        ctx = _make_ctx(client)
+
+        result = json.loads(complete_assignment(ctx, assignment_name="Homework 1"))
+
+        assert result["status"] == "needs_input"
+        assert result["action_taken"] == "none"
+        assert "online_upload" in result["next_step"]
+
+    def test_submits_text_assignment(self):
+        client = MagicMock()
+        client.list_assignments.return_value = [
+            {
+                "id": 10,
+                "name": "Reflection",
+                "submission_types": ["online_text_entry"],
+                "html_url": "https://canvas.test/courses/100/assignments/10",
+            }
+        ]
+        client.submit_assignment.return_value = {"id": 333, "workflow_state": "submitted"}
+        ctx = _make_ctx(client)
+
+        result = json.loads(
+            complete_assignment(
+                ctx,
+                assignment_name="Reflection",
+                course_id=100,
+                text_submission="Done.",
+            )
+        )
+
+        assert result["status"] == "completed"
+        assert result["action_taken"] == "submitted_online_text_entry"
+        client.submit_assignment.assert_called_once_with(
+            100,
+            10,
+            submission_type="online_text_entry",
+            body={"body": "Done."},
+        )
+
+    def test_marks_module_done_when_no_submission_types(self):
+        client = MagicMock()
+        client.list_assignments.return_value = [
+            {
+                "id": 10,
+                "name": "Reading Check",
+                "submission_types": ["none"],
+                "html_url": "https://canvas.test/courses/100/assignments/10",
+            }
+        ]
+        client.list_course_modules_with_items.return_value = [
+            {
+                "id": 5,
+                "items": [{"id": 55, "type": "Assignment", "content_id": 10}],
+            }
+        ]
+        client.mark_module_item_done.return_value = {"done": True}
+        ctx = _make_ctx(client)
+
+        result = json.loads(
+            complete_assignment(ctx, assignment_name="Reading Check", course_id=100)
+        )
+
+        assert result["status"] == "completed"
+        assert result["action_taken"] == "marked_module_item_done"
+        client.mark_module_item_done.assert_called_once_with(100, 5, 55)
+
+    def test_returns_manual_action_when_no_automation_available(self):
+        client = MagicMock()
+        client.list_assignments.return_value = [
+            {
+                "id": 10,
+                "name": "Paper",
+                "submission_types": ["none"],
+                "html_url": "https://canvas.test/courses/100/assignments/10",
+            }
+        ]
+        client.list_course_modules_with_items.return_value = []
+        ctx = _make_ctx(client)
+
+        result = json.loads(complete_assignment(ctx, assignment_name="Paper", course_id=100))
+
+        assert result["status"] == "manual_action"
+        assert result["url"] == "https://canvas.test/courses/100/assignments/10"
+
+    def test_upload_submission_uses_absolute_paths(self, tmp_path):
+        local_file = tmp_path / "homework.py"
+        local_file.write_text("print('ok')\n", encoding="utf-8")
+
+        client = MagicMock()
+        client.list_assignments.return_value = [
+            {
+                "id": 10,
+                "name": "Code HW",
+                "submission_types": ["online_upload"],
+                "html_url": "https://canvas.test/courses/100/assignments/10",
+            }
+        ]
+        client.init_assignment_file_upload.return_value = {
+            "upload_url": "https://upload.canvas.test",
+            "upload_params": {"token": "abc"},
+        }
+        client.upload_file_to_canvas.return_value = {"id": 7001}
+        client.submit_assignment.return_value = {"id": 9001}
+        ctx = _make_ctx(client)
+
+        result = json.loads(
+            complete_assignment(
+                ctx,
+                assignment_name="Code HW",
+                course_id=100,
+                file_paths=[str(local_file.resolve())],
+            )
+        )
+
+        assert result["status"] == "completed"
+        assert result["action_taken"] == "submitted_online_upload"
+        client.submit_assignment.assert_called_once_with(
+            100,
+            10,
+            submission_type="online_upload",
+            body={"file_ids": [7001]},
+        )
