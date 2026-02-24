@@ -15,7 +15,6 @@
 - `cvsctl assignments submit --course <id-or-code> --assignment <id-or-name> [--file <path>...] [--text <content>] [--url <https://...>] [--json] [--base-url <url>]`
 - `cvsctl download run --course <id-or-code>... [--source <source>...] [--dest <path>] [--export-dest] [--overwrite <bool>] [--force] [--concurrency <n>] [--base-url <url>]`
 - `cvsctl download interactive [--dest <path>] [--export-dest] [--base-url <url>] [--concurrency <n>] [--force]`
-- `cvsctl download resume --manifest <path>`
 - `cvsctl mcp serve`
 
 ## Available `--source` values
@@ -38,7 +37,6 @@
 - `--overwrite` defaults to false.
 - `--force` is equivalent to overwrite true.
 - `--concurrency` defaults to configured `default_concurrency` (12).
-- `--manifest` is required for `download resume`.
 - `--format` defaults to `csv` for `grades export`.
 - `--dest` for `grades export` defaults to `~/Downloads`.
 - Every command supports `--help`.
