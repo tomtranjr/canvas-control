@@ -386,3 +386,5 @@ def test_download_interactive_fails_when_no_valid_courses_selected(monkeypatch):
 
     assert result.exit_code == 1
     assert "No valid courses selected." in result.output
+
+

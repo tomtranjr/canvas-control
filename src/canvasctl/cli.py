@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -13,13 +12,10 @@ from rich.table import Table
 
 from canvasctl.auth import AuthError, TokenInfo, prompt_for_token, resolve_token
 from canvasctl.canvas_api import (
-    AssignmentGrade,
     CanvasApiError,
     CanvasClient,
     CanvasUnauthorizedError,
-    CourseGrade,
     CourseSummary,
-    RemoteFile,
 )
 from canvasctl.config import (
     AppConfig,
@@ -47,7 +43,6 @@ from canvasctl.grades import (
     sort_grades,
 )
 from canvasctl.downloader import (
-    DownloadTask,
     build_course_slug,
     download_tasks,
     plan_course_download_tasks,
@@ -61,7 +56,6 @@ from canvasctl.manifest import (
     load_manifest,
     write_course_manifest,
     write_manifest,
-    write_run_summary,
 )
 from canvasctl.sources import (
     ALL_SOURCES,
@@ -306,7 +300,6 @@ def _download_for_courses(
     base_url: str,
     course_paths: dict[str, str] | None = None,
 ) -> int:
-    run_id = str(uuid.uuid4())
     started_at = _iso_now()
 
     summary_table = Table(title="Download Summary")
@@ -315,10 +308,7 @@ def _download_for_courses(
     summary_table.add_column("Skipped", justify="right")
     summary_table.add_column("Failed", justify="right")
     summary_table.add_column("Unresolved", justify="right")
-    summary_table.add_column("Manifest")
 
-    run_items: list[dict[str, object]] = []
-    run_courses: list[dict[str, object]] = []
     had_failures = False
 
     for course in selected_courses:
@@ -352,14 +342,20 @@ def _download_for_courses(
             console=console,
         )
 
-        manifest_items = [result_to_manifest_item(result) for result in results]
+        manifest_items = []
+        for result in results:
+            if result.status == "skipped":
+                prev = previous_by_file_id.get(result.task.file.file_id)
+                if prev is not None:
+                    manifest_items.append(prev)
+                    continue
+            manifest_items.append(result_to_manifest_item(result))
         manifest_items.extend(
             warning_to_manifest_item(warning, course_id=course.id) for warning in warnings
         )
 
         completed_at = _iso_now()
         course_payload = {
-            "run_id": run_id,
             "base_url": base_url,
             "course_id": course.id,
             "sources": sources,
@@ -370,9 +366,8 @@ def _download_for_courses(
 
         if custom_dest is not None:
             write_manifest(manifest_file, course_payload)
-            course_manifest = manifest_file
         else:
-            course_manifest = write_course_manifest(dest_root, course_slug, course_payload)
+            write_course_manifest(dest_root, course_slug, course_payload)
 
         counts = summarize_results(results)
         unresolved_count = len(warnings)
@@ -385,102 +380,11 @@ def _download_for_courses(
             str(counts["skipped"]),
             str(counts["failed"]),
             str(unresolved_count),
-            str(course_manifest),
         )
-
-        run_courses.append(
-            {
-                "course_id": course.id,
-                "course_code": course.course_code,
-                "course_name": course.name,
-                "manifest_path": str(course_manifest),
-                "counts": counts,
-                "unresolved": unresolved_count,
-            }
-        )
-        run_items.extend(manifest_items)
 
     console.print(summary_table)
 
-    run_payload = {
-        "run_id": run_id,
-        "base_url": base_url,
-        "sources": sources,
-        "started_at": started_at,
-        "completed_at": _iso_now(),
-        "courses": run_courses,
-        "items": run_items,
-    }
-    run_manifest = write_run_summary(dest_root, run_payload)
-    console.print(f"[green]Run summary:[/green] {run_manifest}")
-
     return 1 if had_failures else 0
-
-
-def _tasks_from_manifest_payload(payload: dict[str, object]) -> tuple[str, list[DownloadTask]]:
-    base_url = payload.get("base_url")
-    if not isinstance(base_url, str) or not base_url:
-        _fail("Manifest does not include a valid base_url.")
-
-    default_course_id = payload.get("course_id") if isinstance(payload.get("course_id"), int) else -1
-    items = payload.get("items")
-    if not isinstance(items, list):
-        _fail("Manifest format invalid: expected top-level list at key 'items'.")
-
-    tasks: list[DownloadTask] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        status = item.get("status")
-        if status not in {"failed", "pending"}:
-            continue
-
-        file_id = item.get("file_id")
-        remote_url = item.get("remote_url")
-        local_path = item.get("local_path")
-        if not isinstance(file_id, int) or not isinstance(remote_url, str) or not isinstance(local_path, str):
-            continue
-
-        course_id = item.get("course_id") if isinstance(item.get("course_id"), int) else default_course_id
-        source_type = item.get("source_type") if isinstance(item.get("source_type"), str) else "resume"
-        source_ref = item.get("source_ref") if isinstance(item.get("source_ref"), str) else "resume"
-        display_name = item.get("display_name") if isinstance(item.get("display_name"), str) else f"file-{file_id}"
-        size = item.get("size") if isinstance(item.get("size"), int) else None
-        updated_at = item.get("updated_at") if isinstance(item.get("updated_at"), str) else None
-
-        file_obj = RemoteFile(
-            file_id=file_id,
-            course_id=course_id,
-            display_name=display_name,
-            filename=display_name,
-            folder_path="",
-            size=size,
-            updated_at=updated_at,
-            download_url=remote_url,
-            source_type=source_type,
-            source_ref=source_ref,
-        )
-
-        path_obj = Path(local_path).expanduser()
-        course_slug = path_obj.parent.name if path_obj.parent.name else f"course-{course_id}"
-        tasks.append(
-            DownloadTask(
-                course_id=course_id,
-                course_slug=course_slug,
-                file=file_obj,
-                local_path=path_obj,
-            )
-        )
-
-    return base_url, tasks
-
-
-def _dest_root_for_manifest_path(manifest_path: Path) -> Path:
-    if manifest_path.name == ".canvasctl-manifest.json":
-        return manifest_path.parent.parent
-    if manifest_path.parent.name == ".canvasctl-runs":
-        return manifest_path.parent.parent
-    return manifest_path.parent
 
 
 @config_app.command("set-base-url")
@@ -1065,75 +969,6 @@ def download_interactive(
         )
 
     exit_code = _run_with_client(resolved_base_url, action)
-    if exit_code:
-        raise typer.Exit(code=exit_code)
-
-
-@download_app.command("resume")
-def download_resume(
-    manifest: Path = typer.Option(
-        ...,
-        "--manifest",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Path to a prior run summary or course manifest JSON.",
-    ),
-) -> None:
-    """Resume failed/pending downloads from a manifest file."""
-    try:
-        payload = json.loads(manifest.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        _fail(f"Could not parse manifest JSON: {exc}")
-
-    if not isinstance(payload, dict):
-        _fail("Manifest must be a JSON object.")
-
-    base_url, tasks = _tasks_from_manifest_payload(payload)
-    if not tasks:
-        console.print("[yellow]No failed/pending items found in manifest.[/yellow]")
-        return
-
-    destination_root = _dest_root_for_manifest_path(manifest)
-
-    def action(client: CanvasClient) -> int:
-        results = download_tasks(
-            client,
-            tasks,
-            previous_items_by_file_id={},
-            force=True,
-            concurrency=DEFAULT_CONCURRENCY,
-            console=console,
-        )
-
-        counts = summarize_results(results)
-        summary_table = Table(title="Resume Summary")
-        summary_table.add_column("Downloaded", justify="right")
-        summary_table.add_column("Skipped", justify="right")
-        summary_table.add_column("Failed", justify="right")
-        summary_table.add_row(
-            str(counts["downloaded"]),
-            str(counts["skipped"]),
-            str(counts["failed"]),
-        )
-        console.print(summary_table)
-
-        run_payload = {
-            "run_id": str(uuid.uuid4()),
-            "base_url": base_url,
-            "sources": ["resume"],
-            "started_at": _iso_now(),
-            "completed_at": _iso_now(),
-            "courses": [],
-            "items": [result_to_manifest_item(result) for result in results],
-        }
-        run_summary = write_run_summary(destination_root, run_payload)
-        console.print(f"[green]Resume summary:[/green] {run_summary}")
-
-        return 1 if counts["failed"] else 0
-
-    exit_code = _run_with_client(base_url, action)
     if exit_code:
         raise typer.Exit(code=exit_code)
 
