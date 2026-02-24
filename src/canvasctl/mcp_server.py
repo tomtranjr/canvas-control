@@ -18,7 +18,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from rich.console import Console
 
 from canvasctl.canvas_api import CanvasClient, CourseSummary
-from canvasctl.config import AppConfig, get_course_path, load_config
+from canvasctl.config import AppConfig, get_course_path, load_config, set_course_path, set_default_destination
 from canvasctl.downloader import (
     build_course_slug,
     download_tasks,
@@ -480,6 +480,179 @@ def download_file(
         return _json({"error": str(exc)})
 
 
+@mcp.tool()
+def search_course_files(
+    ctx: Context,
+    course_id: int,
+    query: str | None = None,
+    file_type: str | None = None,
+    folder: str | None = None,
+) -> str:
+    """Search for files in a Canvas course by name, extension, or folder.
+
+    Use this as a preview step before downloading — show the user what
+    would be downloaded and let them confirm.
+
+    Args:
+        course_id: The Canvas course ID.
+        query: Case-insensitive substring to match in file display name or filename.
+        file_type: File extension to filter by (e.g. "pdf", "docx"). Leading dot is stripped.
+        folder: Case-insensitive substring to match in the Canvas folder path.
+    """
+    try:
+        app = _get_ctx(ctx)
+        files = app.client.list_course_files(course_id)
+        folder_map = app.client.list_course_folders(course_id)
+
+        norm_query = query.casefold() if query else None
+        norm_type = file_type.lstrip(".").casefold() if file_type else None
+        norm_folder = folder.casefold() if folder else None
+
+        results: list[dict[str, Any]] = []
+        for f in files:
+            display_name = str(f.get("display_name") or "")
+            filename = str(f.get("filename") or "")
+            folder_id = f.get("folder_id")
+            folder_path = folder_map.get(int(folder_id), "") if folder_id is not None else ""
+
+            if norm_query and norm_query not in display_name.casefold() and norm_query not in filename.casefold():
+                continue
+
+            if norm_type:
+                ext = Path(filename).suffix.lstrip(".").casefold()
+                if ext != norm_type:
+                    continue
+
+            if norm_folder and norm_folder not in folder_path.casefold():
+                continue
+
+            results.append({
+                "file_id": f.get("id"),
+                "display_name": display_name,
+                "filename": filename,
+                "folder_path": folder_path,
+                "size": f.get("size"),
+                "content_type": f.get("content-type") or f.get("content_type"),
+                "updated_at": f.get("updated_at"),
+            })
+
+        return _json({"total_count": len(results), "files": results})
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+@mcp.tool()
+def download_selected_files(
+    ctx: Context,
+    file_ids: list[int],
+    destination: str,
+) -> str:
+    """Download a batch of specific Canvas files to a local directory.
+
+    Skips files that already exist at the destination (safe to re-run).
+
+    Args:
+        file_ids: List of Canvas file IDs to download (from search_course_files).
+        destination: Local directory path to save files to. ~ is expanded.
+    """
+    try:
+        if not destination or not destination.strip():
+            return _json({"error": "destination must be a non-empty path."})
+
+        app = _get_ctx(ctx)
+        dest_dir = Path(destination).expanduser()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        downloaded: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
+
+        for file_id in file_ids:
+            try:
+                file_info = app.client.get_file(file_id)
+                filename = file_info.get("display_name") or file_info.get("filename") or f"file-{file_id}"
+                download_url = file_info.get("url") or ""
+
+                if not download_url:
+                    failed.append({
+                        "file_id": file_id,
+                        "filename": filename,
+                        "local_path": None,
+                        "status": "failed",
+                        "error": "No download URL available",
+                    })
+                    continue
+
+                local_path = dest_dir / filename
+
+                if local_path.exists():
+                    skipped.append({
+                        "file_id": file_id,
+                        "filename": filename,
+                        "local_path": str(local_path),
+                        "status": "skipped",
+                    })
+                    continue
+
+                bytes_written, _sha256, _etag = app.client.download_file(download_url, local_path)
+                downloaded.append({
+                    "file_id": file_id,
+                    "filename": filename,
+                    "local_path": str(local_path),
+                    "status": "downloaded",
+                    "bytes_written": bytes_written,
+                })
+            except Exception as exc:
+                failed.append({
+                    "file_id": file_id,
+                    "filename": f"file-{file_id}",
+                    "local_path": None,
+                    "status": "failed",
+                    "error": str(exc),
+                })
+
+        return _json({
+            "destination": str(dest_dir),
+            "downloaded": len(downloaded),
+            "skipped": len(skipped),
+            "failed": len(failed),
+            "files": downloaded + skipped + failed,
+        })
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+@mcp.tool()
+def set_download_path(
+    ctx: Context,
+    destination: str,
+    course_id: int | None = None,
+) -> str:
+    """Save a download path to the config file for future use.
+
+    Args:
+        destination: Local directory path to persist. ~ is expanded.
+        course_id: Optional course ID. If provided, saves a per-course path.
+                   If omitted, saves the global default download path.
+    """
+    try:
+        if course_id is not None:
+            set_course_path(course_id, destination)
+            scope = "course"
+        else:
+            set_default_destination(destination)
+            scope = "global"
+
+        return _json({
+            "saved": True,
+            "destination": str(Path(destination).expanduser()),
+            "course_id": course_id,
+            "scope": scope,
+        })
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
 def _find_course(client: CanvasClient, course_id: int) -> CourseSummary | None:
     courses = client.list_courses(include_all=True)
     for c in courses:
@@ -494,6 +667,7 @@ def sync_course_files(
     course_id: int,
     force: bool = False,
     sources: list[str] | None = None,
+    destination: str | None = None,
 ) -> str:
     """Sync (download) all files for a Canvas course to the local filesystem.
 
@@ -505,6 +679,8 @@ def sync_course_files(
         force: If True, overwrite existing files even if unchanged.
         sources: Content sources to include. Defaults to all
                  (files, assignments, discussions, pages, modules).
+        destination: Optional local directory path to save files to. ~ is expanded.
+                     Overrides the configured course path and default destination.
     """
     try:
         app = _get_ctx(ctx)
@@ -516,7 +692,10 @@ def sync_course_files(
 
         selected_sources = normalize_sources(sources)
 
-        custom_dest = get_course_path(course_id, cfg)
+        if destination is not None:
+            custom_dest: Path | None = Path(destination).expanduser()
+        else:
+            custom_dest = get_course_path(course_id, cfg)
         dest_root = cfg.destination_path()
 
         remote_files, warnings = collect_remote_files_for_course(
@@ -576,12 +755,12 @@ def sync_course_files(
             write_course_manifest(dest_root, course_slug, course_payload)
 
         counts = summarize_results(results)
-        destination = str(custom_dest) if custom_dest is not None else str(dest_root / course_slug)
+        result_destination = str(custom_dest) if custom_dest is not None else str(dest_root / course_slug)
 
         return _json({
             "course_id": course_id,
             "course_name": course.name,
-            "destination": destination,
+            "destination": result_destination,
             "downloaded": counts["downloaded"],
             "skipped": counts["skipped"],
             "failed": counts["failed"],

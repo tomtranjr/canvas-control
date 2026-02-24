@@ -6,7 +6,7 @@
 - **Sync** course files like `git pull` — skip unchanged, re-download on demand
 - **Check grades** across all courses from the terminal or export to CSV/JSON
 - **Submit assignments** from the terminal (file upload, text entry, URL)
-- **Talk to Canvas** through AI assistants (Claude Desktop, Cursor, Claude Code) using natural language
+- **Talk to Canvas** through AI assistants (Claude Desktop, Cursor, Claude Code) — search files, download by name or type, sync courses, and set paths in natural language
 
 ## Star History
 
@@ -75,10 +75,38 @@ cvsctl courses list
 | `get_syllabus` | Course syllabus content |
 | `get_grades_summary` | Grade overview across courses |
 | `get_grades_detailed` | Per-assignment grade breakdown |
-| `list_course_files` | List all files in a course |
+| `list_course_files` | List all files in a course (raw) |
+| `search_course_files` | Search files by name, type, or folder — preview before downloading |
 | `download_file` | Download a single file by ID |
+| `download_selected_files` | Download a batch of specific files to a local directory |
+| `set_download_path` | Save a download path to config (global or per-course) |
 | `complete_assignment` | Mark assignment complete (submission or module completion flow) |
-| `sync_course_files` | Sync all course files to local disk (like `git pull`) |
+| `sync_course_files` | Sync all course files to local disk; supports custom `destination` |
+
+### Natural language file downloads
+
+Three new tools enable a conversational download workflow directly from Claude Desktop or Cursor:
+
+**`search_course_files`** — search before you download. Filter by name substring, file extension, or folder path. The assistant shows you a preview of matching files so you can confirm before anything hits disk.
+
+**`download_selected_files`** — download a batch of specific files (by Canvas file ID) to any local directory. Skips files that already exist, so it's safe to re-run. Returns a per-file status: `downloaded`, `skipped`, or `failed`.
+
+**`set_download_path`** — persist a directory path to config so you don't have to specify it every time. Set a global default or a per-course path.
+
+**`sync_course_files`** — now accepts an optional `destination` parameter, so you can tell the assistant exactly where to put everything without touching config first.
+
+Example conversation:
+
+```
+You: Search for PDF files in my Biology course
+Claude: Found 8 PDFs — Lecture 1.pdf, Lecture 2.pdf, Syllabus.pdf …
+
+You: Download those to ~/Documents/Bio
+Claude: Downloaded 7, skipped 1 (already exists). Saved to ~/Documents/Bio.
+
+You: Save that as my default path for Biology
+Claude: Saved ~/Documents/Bio as the download path for Biology (course 12345).
+```
 
 ### Claude Desktop
 
@@ -130,13 +158,21 @@ Set `CANVAS_TOKEN`, `CANVAS_BASE_URL`, and optionally `CANVAS_TIMEZONE` in your 
 
 ### Example prompts
 
+Courses, grades, and assignments:
+
 - "What classes am I taking?"
 - "What assignments are due this week?"
 - "Show my grades for Biology"
 - "Are there any new announcements?"
-- "Update my local canvas files for Time Series"
-- "Re-download all files for Biology with override"
 - "Mark Homework 2 complete"
+
+Downloading files:
+
+- "Search for slides in my CS101 course"
+- "Download the lecture PDFs from my Biology course to ~/Documents/Bio"
+- "Save ~/Documents/Bio as my default download path for Biology"
+- "Sync all files from my Time Series course to ~/Documents/School"
+- "Re-download all files for Biology, overwriting existing ones"
 
 ## CLI highlights
 

@@ -31,6 +31,7 @@ from canvasctl.mcp_server import (
     _strip_html,
     complete_assignment,
     download_file,
+    download_selected_files,
     get_announcements,
     get_calendar_events,
     get_grades_detailed,
@@ -39,6 +40,8 @@ from canvasctl.mcp_server import (
     get_upcoming_assignments,
     list_course_files,
     list_courses,
+    search_course_files,
+    set_download_path,
     sync_course_files,
 )
 
@@ -791,3 +794,226 @@ class TestCompleteAssignment:
             submission_type="online_upload",
             body={"file_ids": [7001]},
         )
+
+
+_SAMPLE_FILES = [
+    {
+        "id": 1,
+        "display_name": "Lecture 1.pdf",
+        "filename": "lecture_1.pdf",
+        "folder_id": 10,
+        "size": 1024,
+        "content-type": "application/pdf",
+        "updated_at": "2025-01-10T12:00:00Z",
+    },
+    {
+        "id": 2,
+        "display_name": "Notes.docx",
+        "filename": "notes.docx",
+        "folder_id": 10,
+        "size": 512,
+        "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "updated_at": "2025-01-11T12:00:00Z",
+    },
+    {
+        "id": 3,
+        "display_name": "Syllabus.pdf",
+        "filename": "syllabus.pdf",
+        "folder_id": 20,
+        "size": 256,
+        "content-type": "application/pdf",
+        "updated_at": "2025-01-01T10:00:00Z",
+    },
+]
+
+_SAMPLE_FOLDERS = {10: "course files/lectures", 20: "course files"}
+
+
+class TestSearchCourseFiles:
+    def _make_client(self):
+        client = MagicMock()
+        client.list_course_files.return_value = _SAMPLE_FILES
+        client.list_course_folders.return_value = _SAMPLE_FOLDERS
+        return client
+
+    def test_no_filters_returns_all(self):
+        ctx = _make_ctx(self._make_client())
+        result = json.loads(search_course_files(ctx, course_id=100))
+        assert result["total_count"] == 3
+        assert len(result["files"]) == 3
+
+    def test_query_filter_by_name(self):
+        ctx = _make_ctx(self._make_client())
+        result = json.loads(search_course_files(ctx, course_id=100, query="lecture"))
+        assert result["total_count"] == 1
+        assert result["files"][0]["display_name"] == "Lecture 1.pdf"
+
+    def test_file_type_filter(self):
+        ctx = _make_ctx(self._make_client())
+        result = json.loads(search_course_files(ctx, course_id=100, file_type="pdf"))
+        assert result["total_count"] == 2
+        names = [f["display_name"] for f in result["files"]]
+        assert "Lecture 1.pdf" in names
+        assert "Syllabus.pdf" in names
+
+    def test_file_type_filter_with_leading_dot(self):
+        ctx = _make_ctx(self._make_client())
+        result = json.loads(search_course_files(ctx, course_id=100, file_type=".docx"))
+        assert result["total_count"] == 1
+        assert result["files"][0]["display_name"] == "Notes.docx"
+
+    def test_folder_filter(self):
+        ctx = _make_ctx(self._make_client())
+        result = json.loads(search_course_files(ctx, course_id=100, folder="lectures"))
+        assert result["total_count"] == 2
+        ids = [f["file_id"] for f in result["files"]]
+        assert 1 in ids
+        assert 2 in ids
+
+    def test_case_insensitive(self):
+        ctx = _make_ctx(self._make_client())
+        result = json.loads(search_course_files(ctx, course_id=100, file_type="PDF"))
+        assert result["total_count"] == 2
+
+    def test_no_results(self):
+        ctx = _make_ctx(self._make_client())
+        result = json.loads(search_course_files(ctx, course_id=100, query="nonexistent"))
+        assert result["total_count"] == 0
+        assert result["files"] == []
+
+    def test_error(self):
+        client = MagicMock()
+        client.list_course_files.side_effect = RuntimeError("API error")
+        ctx = _make_ctx(client)
+        result = json.loads(search_course_files(ctx, course_id=100))
+        assert "error" in result
+
+
+class TestDownloadSelectedFiles:
+    def test_download_success(self, tmp_path):
+        client = MagicMock()
+        client.get_file.return_value = {
+            "display_name": "notes.pdf",
+            "url": "https://canvas.test/files/1/download",
+        }
+        client.download_file.return_value = (1024, "sha256abc", None)
+        ctx = _make_ctx(client)
+
+        result = json.loads(download_selected_files(ctx, file_ids=[1], destination=str(tmp_path)))
+        assert result["downloaded"] == 1
+        assert result["skipped"] == 0
+        assert result["failed"] == 0
+        assert result["files"][0]["status"] == "downloaded"
+        assert result["files"][0]["bytes_written"] == 1024
+
+    def test_skip_existing(self, tmp_path):
+        existing = tmp_path / "notes.pdf"
+        existing.write_text("exists", encoding="utf-8")
+
+        client = MagicMock()
+        client.get_file.return_value = {
+            "display_name": "notes.pdf",
+            "url": "https://canvas.test/files/1/download",
+        }
+        ctx = _make_ctx(client)
+
+        result = json.loads(download_selected_files(ctx, file_ids=[1], destination=str(tmp_path)))
+        assert result["downloaded"] == 0
+        assert result["skipped"] == 1
+        assert result["files"][0]["status"] == "skipped"
+        client.download_file.assert_not_called()
+
+    def test_invalid_destination(self):
+        client = MagicMock()
+        ctx = _make_ctx(client)
+
+        result = json.loads(download_selected_files(ctx, file_ids=[1], destination=""))
+        assert "error" in result
+
+    def test_partial_failure(self, tmp_path):
+        client = MagicMock()
+
+        def get_file_side_effect(file_id):
+            if file_id == 1:
+                return {"display_name": "ok.pdf", "url": "https://canvas.test/files/1/download"}
+            raise RuntimeError("not found")
+
+        client.get_file.side_effect = get_file_side_effect
+        client.download_file.return_value = (512, "sha", None)
+        ctx = _make_ctx(client)
+
+        result = json.loads(download_selected_files(ctx, file_ids=[1, 2], destination=str(tmp_path)))
+        assert result["downloaded"] == 1
+        assert result["failed"] == 1
+        statuses = {f["file_id"]: f["status"] for f in result["files"]}
+        assert statuses[1] == "downloaded"
+        assert statuses[2] == "failed"
+
+    def test_no_download_url(self, tmp_path):
+        client = MagicMock()
+        client.get_file.return_value = {"display_name": "missing.pdf", "url": ""}
+        ctx = _make_ctx(client)
+
+        result = json.loads(download_selected_files(ctx, file_ids=[5], destination=str(tmp_path)))
+        assert result["failed"] == 1
+        assert "No download URL" in result["files"][0]["error"]
+
+    def test_error(self):
+        client = MagicMock()
+        client.get_file.side_effect = RuntimeError("boom")
+        ctx = _make_ctx(client)
+
+        result = json.loads(download_selected_files(ctx, file_ids=[1], destination="/tmp/test"))
+        assert result["failed"] == 1
+
+
+class TestSetDownloadPath:
+    def test_set_global_path(self, tmp_path):
+        ctx = _make_ctx(MagicMock())
+        with patch("canvasctl.mcp_server.set_default_destination") as mock_set:
+            result = json.loads(set_download_path(ctx, destination=str(tmp_path)))
+        mock_set.assert_called_once_with(str(tmp_path))
+        assert result["saved"] is True
+        assert result["scope"] == "global"
+        assert result["course_id"] is None
+
+    def test_set_course_path(self, tmp_path):
+        ctx = _make_ctx(MagicMock())
+        with patch("canvasctl.mcp_server.set_course_path") as mock_set:
+            result = json.loads(set_download_path(ctx, destination=str(tmp_path), course_id=100))
+        mock_set.assert_called_once_with(100, str(tmp_path))
+        assert result["saved"] is True
+        assert result["scope"] == "course"
+        assert result["course_id"] == 100
+
+    def test_config_error(self):
+        ctx = _make_ctx(MagicMock())
+        with patch("canvasctl.mcp_server.set_default_destination", side_effect=ValueError("bad path")):
+            result = json.loads(set_download_path(ctx, destination=""))
+        assert "error" in result
+
+
+class TestSyncCourseFilesWithDestination:
+    def test_custom_destination_overrides_config(self, tmp_path):
+        client = MagicMock()
+        client.list_courses.return_value = [_BIO_COURSE]
+        cfg = AppConfig(default_dest=str(tmp_path / "default"))
+        ctx = _make_ctx(client, config=cfg)
+
+        custom = str(tmp_path / "custom")
+        fake_remote = MagicMock()
+        fake_remote.file_id = 1
+
+        with (
+            patch(f"{_SYNC_PREFIX}.collect_remote_files_for_course", return_value=([fake_remote], [])),
+            patch(f"{_SYNC_PREFIX}.plan_course_download_tasks", return_value=[]) as mock_plan,
+            patch(f"{_SYNC_PREFIX}.download_tasks", return_value=[]),
+            patch(f"{_SYNC_PREFIX}.load_manifest", return_value={}),
+            patch(f"{_SYNC_PREFIX}.write_manifest"),
+        ):
+            result = json.loads(sync_course_files(ctx, course_id=100, destination=custom))
+
+        assert result["destination"] == custom
+        _, kwargs = mock_plan.call_args
+        assert kwargs["course_dest"] is not None
+        assert str(kwargs["course_dest"]) == custom
