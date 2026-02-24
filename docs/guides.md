@@ -121,16 +121,6 @@ You can still provide overrides:
 cvsctl download interactive --dest ~/Downloads/canvas-files --export-dest --concurrency 16
 ```
 
-## Resume failed downloads
-
-Every run writes manifest files. To retry anything marked `failed` or `pending`:
-
-```bash
-cvsctl download resume --manifest /path/to/.canvasctl-runs/<run-id>.json
-```
-
-This is ideal for flaky networks or large course downloads.
-
 ## Health check
 
 Use the health check before your first download, after rotating credentials, or when you suspect auth/config issues:

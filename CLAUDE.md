@@ -131,7 +131,7 @@ CLI (Typer)          MCP Server (FastMCP)
 
 - **`downloader.py`**: Plans and executes concurrent downloads. `plan_course_download_tasks()` checks manifests and determines what needs downloading. `download_tasks()` runs tasks with a progress bar. Output path uses `{dest}/{course-slug}/{folder-path}/{filename}`.
 
-- **`manifest.py`**: Persists download state to JSON (one file per course). Enables resume of interrupted downloads. `write_run_summary()` appends a summary of each run.
+- **`manifest.py`**: Persists download state to JSON (one manifest per course). Powers idempotent skip logic across runs.
 
 - **`grades.py`**: Formats grade data into Rich tables and exports to CSV/JSON. `sort_grades()` and `sort_assignment_grades()` use stable sort by score descending.
 
@@ -164,7 +164,6 @@ cvsctl download run --course <id-or-code>... [--source <source>...]
                     [--concurrency <n>] [--base-url <url>]
 cvsctl download interactive [--dest <path>] [--export-dest] [--base-url <url>]
                              [--concurrency <n>] [--force]
-cvsctl download resume --manifest <path>
 
 cvsctl mcp serve
 ```
@@ -252,7 +251,7 @@ The config file is stored at the platform-appropriate config directory:
 
 Files are saved to: `{dest}/{course-slug}/{canvas-folder-path}/{filename}`
 
-Duplicate filenames within a course folder get `_{file_id}` appended to avoid collisions. The manifest file is written alongside downloads for resume capability.
+Duplicate filenames within a course folder get `_{file_id}` appended to avoid collisions. The manifest file is written alongside downloads for idempotent skip logic.
 
 ## Environment Variables
 

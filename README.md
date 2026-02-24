@@ -24,7 +24,7 @@
 ## Why canvas-control
 
 - One command downloads from `files`, `assignments`, `discussions`, `pages`, and `modules`.
-- Built for repeatable workflows: predictable output paths, machine-readable manifests, resume on failure.
+- Built for repeatable workflows: predictable output paths, machine-readable manifests, idempotent re-runs.
 - Guided mode (`download interactive`) for beginners, fully scripted mode (`download run`) for power users.
 - Grades accessible from the terminal: summaries, per-assignment breakdowns, CSV/JSON export.
 - MCP server lets AI assistants query courses, grades, assignments, and sync files with natural language.
@@ -212,7 +212,7 @@ See [CLI Reference](docs/cli-reference.md) for the full command tree and all opt
 
 - [Configuration](docs/configuration.md) — token setup, download paths, per-course paths
 - [CLI Reference](docs/cli-reference.md) — full command tree and behavior notes
-- [Guides](docs/guides.md) — workflows, grades, interactive mode, resume, troubleshooting
+- [Guides](docs/guides.md) — workflows, grades, interactive mode, troubleshooting
 
 ## Contributing
 

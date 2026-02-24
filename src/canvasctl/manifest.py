@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +31,5 @@ def write_manifest(path: Path, payload: dict[str, Any]) -> None:
 
 def write_course_manifest(dest_root: Path, course_slug: str, payload: dict[str, Any]) -> Path:
     path = course_manifest_path(dest_root, course_slug)
-    write_manifest(path, payload)
-    return path
-
-
-def write_run_summary(dest_root: Path, payload: dict[str, Any]) -> Path:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    path = dest_root / ".canvasctl-runs" / f"{timestamp}.json"
     write_manifest(path, payload)
     return path
