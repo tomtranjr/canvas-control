@@ -19,6 +19,7 @@
 - [MCP server (AI assistants)](#mcp-server-ai-assistants)
 - [CLI highlights](#cli-highlights)
 - [Documentation](#documentation)
+- [Dev Testing](#dev-testing)
 - [Contributing](#contributing)
 
 ## Why canvas-control
@@ -177,6 +178,33 @@ See [CLI Reference](docs/cli-reference.md) for the full command tree and all opt
 - [Configuration](docs/configuration.md) — token setup, download paths, per-course paths
 - [CLI Reference](docs/cli-reference.md) — full command tree and behavior notes
 - [Guides](docs/guides.md) — workflows, grades, interactive mode, resume, troubleshooting
+
+## Dev Testing
+
+When changes are merged into the main branch, update your local clone and reinstall so the MCP server picks up the latest code.
+
+1. Pull the latest changes:
+
+```bash
+git pull origin main
+```
+
+2. Reinstall the package (picks up new dependencies or entry-point changes):
+
+```bash
+uv pip install -e '.[dev]'
+```
+
+3. Run the test suite to verify nothing is broken:
+
+```bash
+uv run pytest
+```
+
+4. Restart the MCP server in your AI client so it spawns a fresh process:
+   - **Claude Desktop**: quit and relaunch the app
+   - **Cursor**: open Settings → MCP and click the refresh/reconnect button
+   - **Claude Code**: the server is spawned per-session; start a new session
 
 ## Contributing
 
