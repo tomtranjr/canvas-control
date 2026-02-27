@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -1078,6 +1079,90 @@ def complete_assignment(
                 next_step=str(exc),
             )
         )
+
+
+_ROOM_RESERVATION_FORM_URL = (
+    "https://docs.google.com/forms/d/e/"
+    "1FAIpQLSc3VgP92ybtuIe5snk_tw2QQXB8u5VsXDo-CBD_AsRujg6zVw/viewform"
+)
+
+_ROOM_FORM_ENTRY_IDS: dict[str, int] = {
+    "name": 1581876510,
+    "email": 517069695,
+    "phone": 1365170802,
+    "date": 1394121387,
+    "start_time": 714892402,
+    "end_time": 1579380649,
+    "num_people": 1785840432,
+    "room_type": 1694640372,
+    "floor_preference": 844059824,
+    "notes": 784944234,
+}
+
+
+@mcp.tool()
+def reserve_room(
+    name: str,
+    email: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+    num_people: int,
+    room_type: str,
+    phone: str | None = None,
+    floor_preference: str | None = None,
+    notes: str | None = None,
+) -> str:
+    """Reserve a study or meeting room at the USF Downtown Campus.
+
+    Returns a pre-filled Google Forms URL the user can open to submit their
+    room reservation request.
+
+    Args:
+        name: First and last name (family name required).
+        email: USF email address (format: xxxxx@dons.usfca.edu).
+        date: Date of reservation in MM/DD/YYYY format.
+        start_time: Start time (e.g. "10:00 AM").
+        end_time: End time (e.g. "12:00 PM").
+        num_people: Number of people for the reservation.
+        room_type: One of "Study Room", "Large Conference Room (1st or 4th floor)", or "Classroom".
+        phone: Contact phone number (required for first-time requesters, e.g. "415-422-4770").
+        floor_preference: One of "1st Floor", "4th Floor", or "5th Floor".
+        notes: Additional questions or notes about the reservation.
+    """
+    params: dict[str, str] = {
+        f"entry.{_ROOM_FORM_ENTRY_IDS['name']}": name,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['email']}": email,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['date']}": date,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['start_time']}": start_time,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['end_time']}": end_time,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['num_people']}": str(num_people),
+        f"entry.{_ROOM_FORM_ENTRY_IDS['room_type']}": room_type,
+    }
+    if phone:
+        params[f"entry.{_ROOM_FORM_ENTRY_IDS['phone']}"] = phone
+    if floor_preference:
+        params[f"entry.{_ROOM_FORM_ENTRY_IDS['floor_preference']}"] = floor_preference
+    if notes:
+        params[f"entry.{_ROOM_FORM_ENTRY_IDS['notes']}"] = notes
+
+    prefilled_url = f"{_ROOM_RESERVATION_FORM_URL}?{urlencode(params)}"
+    return _json({
+        "form_url": prefilled_url,
+        "message": "Open the URL to review and submit your room reservation request.",
+        "fields": {
+            "name": name,
+            "email": email,
+            "date": date,
+            "start_time": start_time,
+            "end_time": end_time,
+            "num_people": num_people,
+            "room_type": room_type,
+            "phone": phone,
+            "floor_preference": floor_preference,
+            "notes": notes,
+        },
+    })
 
 
 def main() -> None:

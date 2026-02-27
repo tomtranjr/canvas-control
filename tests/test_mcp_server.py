@@ -40,6 +40,7 @@ from canvasctl.mcp_server import (
     get_upcoming_assignments,
     list_course_files,
     list_courses,
+    reserve_room,
     search_course_files,
     set_download_path,
     sync_course_files,
@@ -1017,3 +1018,83 @@ class TestSyncCourseFilesWithDestination:
         _, kwargs = mock_plan.call_args
         assert kwargs["course_dest"] is not None
         assert str(kwargs["course_dest"]) == custom
+
+
+class TestReserveRoom:
+    def _call(self, **kwargs) -> dict:
+        import json
+        result = reserve_room(**kwargs)
+        return json.loads(result)
+
+    def _base_kwargs(self, **overrides):
+        base = dict(
+            name="Jane Doe",
+            email="jdoe@dons.usfca.edu",
+            date="03/15/2026",
+            start_time="10:00 AM",
+            end_time="12:00 PM",
+            num_people=3,
+            room_type="Study Room",
+            phone=None,
+            floor_preference=None,
+            notes=None,
+        )
+        base.update(overrides)
+        return base
+
+    def test_returns_form_url(self):
+        result = self._call(**self._base_kwargs())
+        assert "form_url" in result
+        assert "docs.google.com/forms" in result["form_url"]
+
+    def test_url_contains_required_entry_ids(self):
+        from urllib.parse import parse_qs, urlparse
+        result = self._call(**self._base_kwargs())
+        qs = parse_qs(urlparse(result["form_url"]).query)
+        assert "entry.1581876510" in qs   # name
+        assert "entry.517069695" in qs    # email
+        assert "entry.1394121387" in qs   # date
+        assert "entry.714892402" in qs    # start_time
+        assert "entry.1579380649" in qs   # end_time
+        assert "entry.1785840432" in qs   # num_people
+        assert "entry.1694640372" in qs   # room_type
+
+    def test_optional_fields_absent_when_none(self):
+        from urllib.parse import parse_qs, urlparse
+        result = self._call(**self._base_kwargs())
+        qs = parse_qs(urlparse(result["form_url"]).query)
+        assert "entry.1365170802" not in qs   # phone
+        assert "entry.844059824" not in qs    # floor_preference
+        assert "entry.784944234" not in qs    # notes
+
+    def test_optional_fields_present_when_provided(self):
+        from urllib.parse import parse_qs, urlparse
+        result = self._call(**self._base_kwargs(
+            phone="415-555-1234",
+            floor_preference="4th Floor",
+            notes="Need a projector",
+        ))
+        qs = parse_qs(urlparse(result["form_url"]).query)
+        assert qs["entry.1365170802"] == ["415-555-1234"]
+        assert qs["entry.844059824"] == ["4th Floor"]
+        assert qs["entry.784944234"] == ["Need a projector"]
+
+    def test_fields_echoed_in_response(self):
+        result = self._call(**self._base_kwargs(phone="415-555-1234"))
+        assert result["fields"]["name"] == "Jane Doe"
+        assert result["fields"]["email"] == "jdoe@dons.usfca.edu"
+        assert result["fields"]["phone"] == "415-555-1234"
+        assert result["fields"]["num_people"] == 3
+
+    def test_message_present(self):
+        result = self._call(**self._base_kwargs())
+        assert "message" in result
+        assert result["message"]
+
+    def test_conference_room_type(self):
+        from urllib.parse import parse_qs, urlparse
+        result = self._call(**self._base_kwargs(
+            room_type="Large Conference Room (1st or 4th floor)",
+        ))
+        qs = parse_qs(urlparse(result["form_url"]).query)
+        assert qs["entry.1694640372"] == ["Large Conference Room (1st or 4th floor)"]
