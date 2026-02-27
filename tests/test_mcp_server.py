@@ -26,6 +26,7 @@ from canvasctl.canvas_api import (
 from canvasctl.config import AppConfig
 from canvasctl.mcp_server import (
     AppContext,
+    _check_google_form_closed,
     _convert_tz,
     _find_course,
     _localize_dates,
@@ -1021,8 +1022,60 @@ class TestSyncCourseFilesWithDestination:
         assert str(kwargs["course_dest"]) == custom
 
 
+class TestCheckGoogleFormClosed:
+    def test_returns_true_for_closed_form_pattern(self):
+        html = 'null,[2],[[1,1,1,1,1],1],null,[null,"This form is no longer accepting responses."]'
+        assert _check_google_form_closed(html) is True
+
+    def test_returns_true_with_whitespace_in_pattern(self):
+        html = '[null, "This form is no longer accepting responses. Please contact..."]'
+        assert _check_google_form_closed(html) is True
+
+    def test_returns_false_for_open_form(self):
+        html = '{"fbzx":"-12345678901234567","some_key":"some_value","items":[]}'
+        assert _check_google_form_closed(html) is False
+
+    def test_returns_false_for_empty_string(self):
+        assert _check_google_form_closed("") is False
+
+    def test_returns_false_when_phrase_only_in_js_variable_name(self):
+        # The phrase alone (not in [null,"..."]) should not trigger it
+        html = 'var msg = "This form is no longer accepting responses."'
+        assert _check_google_form_closed(html) is False
+
+
 class TestReserveRoom:
-    _PATCH_TARGET = "canvasctl.mcp_server.httpx.post"
+    _PATCH_TARGET = "canvasctl.mcp_server.httpx.Client"
+
+    # HTML that represents an open form (no closed-form pattern)
+    _OPEN_FORM_HTML = '"fbzx":"-6042539148756473936","pageHistory":"0"'
+    # HTML that represents a closed form
+    _CLOSED_FORM_HTML = '[null,"This form is no longer accepting responses."]'
+
+    def _make_mock_client(
+        self,
+        *,
+        form_closed: bool = False,
+        get_raises: BaseException | None = None,
+        post_status: int = 200,
+    ) -> MagicMock:
+        """Return a MagicMock that simulates httpx.Client as a context manager."""
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__.return_value = False
+
+        if get_raises is not None:
+            mock_client.get.side_effect = get_raises
+        else:
+            form_page = MagicMock()
+            form_page.text = self._CLOSED_FORM_HTML if form_closed else self._OPEN_FORM_HTML
+            mock_client.get.return_value = form_page
+
+        post_response = MagicMock()
+        post_response.status_code = post_status
+        mock_client.post.return_value = post_response
+
+        return mock_client
 
     def _base_kwargs(self, **overrides):
         base = dict(
@@ -1040,27 +1093,20 @@ class TestReserveRoom:
         base.update(overrides)
         return base
 
-    def _mock_response(self, status_code=200, text="Thanks for submitting"):
-        mock_response = MagicMock()
-        mock_response.status_code = status_code
-        mock_response.text = text
-        return mock_response
-
-    def _call(self, ctx=None, **kwargs) -> dict:
+    def _call(self, ctx=None, mock_client=None, **kwargs) -> dict:
         if ctx is None:
             ctx = _make_ctx(MagicMock())
-        return json.loads(reserve_room(ctx, **kwargs))
+        if mock_client is None:
+            mock_client = self._make_mock_client()
+        with patch(self._PATCH_TARGET, return_value=mock_client):
+            return json.loads(reserve_room(ctx, **kwargs))
 
     def test_success_returns_submitted_status(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
-            result = self._call(ctx, **self._base_kwargs())
+        result = self._call(**self._base_kwargs())
         assert result["status"] == "submitted"
 
     def test_success_includes_calendar_event_details(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
-            result = self._call(ctx, **self._base_kwargs())
+        result = self._call(**self._base_kwargs())
         assert "calendar_event_details" in result
         ced = result["calendar_event_details"]
         assert "summary" in ced
@@ -1074,61 +1120,58 @@ class TestReserveRoom:
         assert "timeZone" in ced["end"]
 
     def test_success_calendar_event_times(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
-            result = self._call(ctx, **self._base_kwargs())
+        result = self._call(**self._base_kwargs())
         ced = result["calendar_event_details"]
         assert ced["start"]["dateTime"] == "2026-03-15T10:00:00"
         assert ced["end"]["dateTime"] == "2026-03-15T12:00:00"
 
-    def test_form_closed(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(
-            self._PATCH_TARGET,
-            return_value=self._mock_response(text="This form is no longer accepting responses."),
-        ):
-            result = self._call(ctx, **self._base_kwargs())
+    def test_form_closed_detected_from_get(self):
+        mock_client = self._make_mock_client(form_closed=True)
+        result = self._call(mock_client=mock_client, **self._base_kwargs())
         assert result["status"] == "form_closed"
+        # POST must NOT be attempted when GET reveals the form is closed
+        mock_client.post.assert_not_called()
 
     def test_http_error_returns_error_status(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response(status_code=500)):
-            result = self._call(ctx, **self._base_kwargs())
+        mock_client = self._make_mock_client(post_status=500)
+        result = self._call(mock_client=mock_client, **self._base_kwargs())
         assert result["status"] == "error"
 
     def test_network_exception_returns_error_status(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, side_effect=httpx.ConnectError("connection refused")):
-            result = self._call(ctx, **self._base_kwargs())
+        mock_client = self._make_mock_client(
+            get_raises=httpx.ConnectError("connection refused"),
+        )
+        result = self._call(mock_client=mock_client, **self._base_kwargs())
         assert result["status"] == "error"
         assert "Network error" in result["message"]
 
     def test_bad_time_format_returns_error(self):
-        ctx = _make_ctx(MagicMock())
-        result = self._call(ctx, **self._base_kwargs(start_time="not-a-time"))
+        # Time parsing fails before any HTTP is attempted
+        result = self._call(**self._base_kwargs(start_time="not-a-time"))
         assert result["status"] == "error"
 
     def test_optional_fields_absent_from_post_data(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()) as mock_post:
-            self._call(ctx, **self._base_kwargs())
-        data = mock_post.call_args.kwargs["data"]
+        mock_client = self._make_mock_client()
+        self._call(mock_client=mock_client, **self._base_kwargs())
+        data = mock_client.post.call_args.kwargs["data"]
         assert "entry.1365170802" not in data   # phone
         assert "entry.844059824" not in data    # floor_preference
         assert "entry.784944234" not in data    # notes
 
     def test_optional_fields_in_post_data_when_provided(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()) as mock_post:
-            result = self._call(ctx, **self._base_kwargs(
+        mock_client = self._make_mock_client()
+        result = self._call(
+            mock_client=mock_client,
+            **self._base_kwargs(
                 phone="415-555-1234",
                 floor_preference="4th Floor",
                 notes="Need a projector",
-            ))
-        data = mock_post.call_args.kwargs["data"]
-        assert data.get("entry.1365170802") == "415-555-1234"   # phone
-        assert data.get("entry.844059824") == "4th Floor"        # floor_preference
-        assert data.get("entry.784944234") == "Need a projector" # notes
+            ),
+        )
+        data = mock_client.post.call_args.kwargs["data"]
+        assert data.get("entry.1365170802") == "415-555-1234"    # phone
+        assert data.get("entry.844059824") == "4th Floor"         # floor_preference
+        assert data.get("entry.784944234") == "Need a projector"  # notes
         ced = result["calendar_event_details"]
         assert "Need a projector" in ced["description"]
         assert "4th Floor" in ced["description"]
@@ -1136,33 +1179,43 @@ class TestReserveRoom:
     def test_timezone_respected_in_calendar_event(self):
         tz = ZoneInfo("America/New_York")
         ctx = _make_ctx(MagicMock(), timezone=tz)
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
-            result = self._call(ctx, **self._base_kwargs())
+        result = self._call(ctx=ctx, **self._base_kwargs())
         ced = result["calendar_event_details"]
         assert ced["start"]["timeZone"] == "America/New_York"
         assert ced["end"]["timeZone"] == "America/New_York"
 
     def test_default_timezone_is_us_pacific(self):
         ctx = _make_ctx(MagicMock(), timezone=None)
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
-            result = self._call(ctx, **self._base_kwargs())
+        result = self._call(ctx=ctx, **self._base_kwargs())
         ced = result["calendar_event_details"]
         assert ced["start"]["timeZone"] == "America/Los_Angeles"
 
     def test_fields_echoed_in_response(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
-            result = self._call(ctx, **self._base_kwargs(phone="415-555-1234"))
+        result = self._call(**self._base_kwargs(phone="415-555-1234"))
         assert result["fields"]["name"] == "Jane Doe"
         assert result["fields"]["email"] == "jdoe@dons.usfca.edu"
         assert result["fields"]["phone"] == "415-555-1234"
         assert result["fields"]["num_people"] == 3
 
     def test_conference_room_type(self):
-        ctx = _make_ctx(MagicMock())
-        with patch(self._PATCH_TARGET, return_value=self._mock_response()) as mock_post:
-            self._call(ctx, **self._base_kwargs(
-                room_type="Large Conference Room (1st or 4th floor)",
-            ))
-        data = mock_post.call_args.kwargs["data"]
+        mock_client = self._make_mock_client()
+        self._call(
+            mock_client=mock_client,
+            **self._base_kwargs(room_type="Large Conference Room (1st or 4th floor)"),
+        )
+        data = mock_client.post.call_args.kwargs["data"]
         assert data["entry.1694640372"] == "Large Conference Room (1st or 4th floor)"
+
+    def test_fbzx_extracted_from_form_page(self):
+        """fbzx token found in the GET response must be forwarded to the POST."""
+        mock_client = self._make_mock_client()
+        mock_client.get.return_value.text = '"fbzx":"-9876543210123456"'
+        self._call(mock_client=mock_client, **self._base_kwargs())
+        data = mock_client.post.call_args.kwargs["data"]
+        assert data.get("fbzx") == "-9876543210123456"
+
+    def test_page_history_added_to_post_data(self):
+        mock_client = self._make_mock_client()
+        self._call(mock_client=mock_client, **self._base_kwargs())
+        data = mock_client.post.call_args.kwargs["data"]
+        assert data.get("pageHistory") == "0"

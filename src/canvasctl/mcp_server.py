@@ -1106,6 +1106,19 @@ _ROOM_FORM_ENTRY_IDS: dict[str, int] = {
 }
 
 
+def _check_google_form_closed(html: str) -> bool:
+    """Return True when FB_PUBLIC_LOAD_DATA_ signals the form is closed.
+
+    Google embeds [null,"This form is no longer accepting responses."] at a
+    specific position in FB_PUBLIC_LOAD_DATA_ only when the form is actually
+    closed (or response-limited).  Open forms have null at that position.
+    """
+    return bool(re.search(
+        r'\[null,\s*"This form is no longer accepting responses\.',
+        html,
+    ))
+
+
 def _parse_reservation_datetime(date: str, time: str) -> datetime:
     """Parse date (MM/DD/YYYY) + time (h:MM AM/PM or HH:MM) into a naive datetime."""
     normalized = time.strip().upper()
@@ -1176,19 +1189,24 @@ def reserve_room(
         if notes:
             data[f"entry.{_ROOM_FORM_ENTRY_IDS['notes']}"] = notes
 
-        response = httpx.post(
-            _ROOM_FORM_RESPONSE_URL,
-            data=data,
-            follow_redirects=True,
-            timeout=15.0,
-        )
+        with httpx.Client(follow_redirects=True, timeout=15.0) as client:
+            # Step 1: GET the viewform page to check availability and obtain
+            # the fbzx CSRF token plus session cookies required by Google.
+            form_page = client.get(_ROOM_RESERVATION_FORM_URL)
+            if _check_google_form_closed(form_page.text):
+                return _json({
+                    "status": "form_closed",
+                    "message": "The room reservation form is no longer accepting responses.",
+                })
 
-        body_lower = response.text.lower()
-        if "no longer accepting responses" in body_lower:
-            return _json({
-                "status": "form_closed",
-                "message": "The room reservation form is no longer accepting responses.",
-            })
+            fbzx_match = re.search(r'"fbzx"\s*:\s*"?(-?\d+)"?', form_page.text)
+            if fbzx_match:
+                data["fbzx"] = fbzx_match.group(1)
+            data["pageHistory"] = "0"
+
+            # Step 2: POST with session cookies carried automatically.
+            response = client.post(_ROOM_FORM_RESPONSE_URL, data=data)
+
         if response.status_code not in {200, 302}:
             return _json({
                 "status": "error",
