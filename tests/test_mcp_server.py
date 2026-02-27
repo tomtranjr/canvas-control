@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 
 from canvasctl.canvas_api import (
@@ -1021,10 +1022,7 @@ class TestSyncCourseFilesWithDestination:
 
 
 class TestReserveRoom:
-    def _call(self, **kwargs) -> dict:
-        import json
-        result = reserve_room(**kwargs)
-        return json.loads(result)
+    _PATCH_TARGET = "canvasctl.mcp_server.httpx.post"
 
     def _base_kwargs(self, **overrides):
         base = dict(
@@ -1042,59 +1040,129 @@ class TestReserveRoom:
         base.update(overrides)
         return base
 
-    def test_returns_form_url(self):
-        result = self._call(**self._base_kwargs())
-        assert "form_url" in result
-        assert "docs.google.com/forms" in result["form_url"]
+    def _mock_response(self, status_code=200, text="Thanks for submitting"):
+        mock_response = MagicMock()
+        mock_response.status_code = status_code
+        mock_response.text = text
+        return mock_response
 
-    def test_url_contains_required_entry_ids(self):
-        from urllib.parse import parse_qs, urlparse
-        result = self._call(**self._base_kwargs())
-        qs = parse_qs(urlparse(result["form_url"]).query)
-        assert "entry.1581876510" in qs   # name
-        assert "entry.517069695" in qs    # email
-        assert "entry.1394121387" in qs   # date
-        assert "entry.714892402" in qs    # start_time
-        assert "entry.1579380649" in qs   # end_time
-        assert "entry.1785840432" in qs   # num_people
-        assert "entry.1694640372" in qs   # room_type
+    def _call(self, ctx=None, **kwargs) -> dict:
+        if ctx is None:
+            ctx = _make_ctx(MagicMock())
+        return json.loads(reserve_room(ctx, **kwargs))
 
-    def test_optional_fields_absent_when_none(self):
-        from urllib.parse import parse_qs, urlparse
-        result = self._call(**self._base_kwargs())
-        qs = parse_qs(urlparse(result["form_url"]).query)
-        assert "entry.1365170802" not in qs   # phone
-        assert "entry.844059824" not in qs    # floor_preference
-        assert "entry.784944234" not in qs    # notes
+    def test_success_returns_submitted_status(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
+            result = self._call(ctx, **self._base_kwargs())
+        assert result["status"] == "submitted"
 
-    def test_optional_fields_present_when_provided(self):
-        from urllib.parse import parse_qs, urlparse
-        result = self._call(**self._base_kwargs(
-            phone="415-555-1234",
-            floor_preference="4th Floor",
-            notes="Need a projector",
-        ))
-        qs = parse_qs(urlparse(result["form_url"]).query)
-        assert qs["entry.1365170802"] == ["415-555-1234"]
-        assert qs["entry.844059824"] == ["4th Floor"]
-        assert qs["entry.784944234"] == ["Need a projector"]
+    def test_success_includes_calendar_event_details(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
+            result = self._call(ctx, **self._base_kwargs())
+        assert "calendar_event_details" in result
+        ced = result["calendar_event_details"]
+        assert "summary" in ced
+        assert "location" in ced
+        assert "description" in ced
+        assert "start" in ced
+        assert "end" in ced
+        assert "dateTime" in ced["start"]
+        assert "timeZone" in ced["start"]
+        assert "dateTime" in ced["end"]
+        assert "timeZone" in ced["end"]
+
+    def test_success_calendar_event_times(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
+            result = self._call(ctx, **self._base_kwargs())
+        ced = result["calendar_event_details"]
+        assert ced["start"]["dateTime"] == "2026-03-15T10:00:00"
+        assert ced["end"]["dateTime"] == "2026-03-15T12:00:00"
+
+    def test_form_closed(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(
+            self._PATCH_TARGET,
+            return_value=self._mock_response(text="This form is no longer accepting responses."),
+        ):
+            result = self._call(ctx, **self._base_kwargs())
+        assert result["status"] == "form_closed"
+
+    def test_http_error_returns_error_status(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response(status_code=500)):
+            result = self._call(ctx, **self._base_kwargs())
+        assert result["status"] == "error"
+
+    def test_network_exception_returns_error_status(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, side_effect=httpx.ConnectError("connection refused")):
+            result = self._call(ctx, **self._base_kwargs())
+        assert result["status"] == "error"
+        assert "Network error" in result["message"]
+
+    def test_bad_time_format_returns_error(self):
+        ctx = _make_ctx(MagicMock())
+        result = self._call(ctx, **self._base_kwargs(start_time="not-a-time"))
+        assert result["status"] == "error"
+
+    def test_optional_fields_absent_from_post_data(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()) as mock_post:
+            self._call(ctx, **self._base_kwargs())
+        data = mock_post.call_args.kwargs["data"]
+        assert "entry.1365170802" not in data   # phone
+        assert "entry.844059824" not in data    # floor_preference
+        assert "entry.784944234" not in data    # notes
+
+    def test_optional_fields_in_post_data_when_provided(self):
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()) as mock_post:
+            result = self._call(ctx, **self._base_kwargs(
+                phone="415-555-1234",
+                floor_preference="4th Floor",
+                notes="Need a projector",
+            ))
+        data = mock_post.call_args.kwargs["data"]
+        assert data.get("entry.1365170802") == "415-555-1234"   # phone
+        assert data.get("entry.844059824") == "4th Floor"        # floor_preference
+        assert data.get("entry.784944234") == "Need a projector" # notes
+        ced = result["calendar_event_details"]
+        assert "Need a projector" in ced["description"]
+        assert "4th Floor" in ced["description"]
+
+    def test_timezone_respected_in_calendar_event(self):
+        tz = ZoneInfo("America/New_York")
+        ctx = _make_ctx(MagicMock(), timezone=tz)
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
+            result = self._call(ctx, **self._base_kwargs())
+        ced = result["calendar_event_details"]
+        assert ced["start"]["timeZone"] == "America/New_York"
+        assert ced["end"]["timeZone"] == "America/New_York"
+
+    def test_default_timezone_is_us_pacific(self):
+        ctx = _make_ctx(MagicMock(), timezone=None)
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
+            result = self._call(ctx, **self._base_kwargs())
+        ced = result["calendar_event_details"]
+        assert ced["start"]["timeZone"] == "America/Los_Angeles"
 
     def test_fields_echoed_in_response(self):
-        result = self._call(**self._base_kwargs(phone="415-555-1234"))
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()):
+            result = self._call(ctx, **self._base_kwargs(phone="415-555-1234"))
         assert result["fields"]["name"] == "Jane Doe"
         assert result["fields"]["email"] == "jdoe@dons.usfca.edu"
         assert result["fields"]["phone"] == "415-555-1234"
         assert result["fields"]["num_people"] == 3
 
-    def test_message_present(self):
-        result = self._call(**self._base_kwargs())
-        assert "message" in result
-        assert result["message"]
-
     def test_conference_room_type(self):
-        from urllib.parse import parse_qs, urlparse
-        result = self._call(**self._base_kwargs(
-            room_type="Large Conference Room (1st or 4th floor)",
-        ))
-        qs = parse_qs(urlparse(result["form_url"]).query)
-        assert qs["entry.1694640372"] == ["Large Conference Room (1st or 4th floor)"]
+        ctx = _make_ctx(MagicMock())
+        with patch(self._PATCH_TARGET, return_value=self._mock_response()) as mock_post:
+            self._call(ctx, **self._base_kwargs(
+                room_type="Large Conference Room (1st or 4th floor)",
+            ))
+        data = mock_post.call_args.kwargs["data"]
+        assert data["entry.1694640372"] == "Large Conference Room (1st or 4th floor)"

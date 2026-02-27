@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
+import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from rich.console import Console
 
@@ -1086,6 +1087,11 @@ _ROOM_RESERVATION_FORM_URL = (
     "1FAIpQLSc3VgP92ybtuIe5snk_tw2QQXB8u5VsXDo-CBD_AsRujg6zVw/viewform"
 )
 
+_ROOM_FORM_RESPONSE_URL = (
+    "https://docs.google.com/forms/d/e/"
+    "1FAIpQLSc3VgP92ybtuIe5snk_tw2QQXB8u5VsXDo-CBD_AsRujg6zVw/formResponse"
+)
+
 _ROOM_FORM_ENTRY_IDS: dict[str, int] = {
     "name": 1581876510,
     "email": 517069695,
@@ -1100,8 +1106,20 @@ _ROOM_FORM_ENTRY_IDS: dict[str, int] = {
 }
 
 
+def _parse_reservation_datetime(date: str, time: str) -> datetime:
+    """Parse date (MM/DD/YYYY) + time (h:MM AM/PM or HH:MM) into a naive datetime."""
+    normalized = time.strip().upper()
+    for fmt in ("%m/%d/%Y %I:%M %p", "%m/%d/%Y %I:%M%p", "%m/%d/%Y %H:%M"):
+        try:
+            return datetime.strptime(f"{date} {normalized}", fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Cannot parse time '{time}'. Use a format like '10:00 AM'.")
+
+
 @mcp.tool()
 def reserve_room(
+    ctx: Context,
     name: str,
     email: str,
     date: str,
@@ -1115,8 +1133,12 @@ def reserve_room(
 ) -> str:
     """Reserve a study or meeting room at the USF Downtown Campus.
 
-    Returns a pre-filled Google Forms URL the user can open to submit their
-    room reservation request.
+    Submits the reservation form programmatically and returns structured
+    calendar event details for booking confirmation.
+
+    After a successful submission (status == "submitted"), use the Google
+    Calendar tool to create an event from `calendar_event_details` to
+    confirm the booking to the user.
 
     Args:
         name: First and last name (family name required).
@@ -1130,39 +1152,97 @@ def reserve_room(
         floor_preference: One of "1st Floor", "4th Floor", or "5th Floor".
         notes: Additional questions or notes about the reservation.
     """
-    params: dict[str, str] = {
-        f"entry.{_ROOM_FORM_ENTRY_IDS['name']}": name,
-        f"entry.{_ROOM_FORM_ENTRY_IDS['email']}": email,
-        f"entry.{_ROOM_FORM_ENTRY_IDS['date']}": date,
-        f"entry.{_ROOM_FORM_ENTRY_IDS['start_time']}": start_time,
-        f"entry.{_ROOM_FORM_ENTRY_IDS['end_time']}": end_time,
-        f"entry.{_ROOM_FORM_ENTRY_IDS['num_people']}": str(num_people),
-        f"entry.{_ROOM_FORM_ENTRY_IDS['room_type']}": room_type,
-    }
-    if phone:
-        params[f"entry.{_ROOM_FORM_ENTRY_IDS['phone']}"] = phone
-    if floor_preference:
-        params[f"entry.{_ROOM_FORM_ENTRY_IDS['floor_preference']}"] = floor_preference
-    if notes:
-        params[f"entry.{_ROOM_FORM_ENTRY_IDS['notes']}"] = notes
+    try:
+        try:
+            dt_start = _parse_reservation_datetime(date, start_time)
+            dt_end = _parse_reservation_datetime(date, end_time)
+        except ValueError as exc:
+            return _json({"status": "error", "message": str(exc)})
 
-    prefilled_url = f"{_ROOM_RESERVATION_FORM_URL}?{urlencode(params)}"
-    return _json({
-        "form_url": prefilled_url,
-        "message": "Open the URL to review and submit your room reservation request.",
-        "fields": {
-            "name": name,
-            "email": email,
-            "date": date,
-            "start_time": start_time,
-            "end_time": end_time,
-            "num_people": num_people,
-            "room_type": room_type,
-            "phone": phone,
-            "floor_preference": floor_preference,
-            "notes": notes,
-        },
-    })
+        data: dict[str, str] = {
+            "fvv": "1",
+            f"entry.{_ROOM_FORM_ENTRY_IDS['name']}": name,
+            f"entry.{_ROOM_FORM_ENTRY_IDS['email']}": email,
+            f"entry.{_ROOM_FORM_ENTRY_IDS['date']}": date,
+            f"entry.{_ROOM_FORM_ENTRY_IDS['start_time']}": start_time,
+            f"entry.{_ROOM_FORM_ENTRY_IDS['end_time']}": end_time,
+            f"entry.{_ROOM_FORM_ENTRY_IDS['num_people']}": str(num_people),
+            f"entry.{_ROOM_FORM_ENTRY_IDS['room_type']}": room_type,
+        }
+        if phone:
+            data[f"entry.{_ROOM_FORM_ENTRY_IDS['phone']}"] = phone
+        if floor_preference:
+            data[f"entry.{_ROOM_FORM_ENTRY_IDS['floor_preference']}"] = floor_preference
+        if notes:
+            data[f"entry.{_ROOM_FORM_ENTRY_IDS['notes']}"] = notes
+
+        response = httpx.post(
+            _ROOM_FORM_RESPONSE_URL,
+            data=data,
+            follow_redirects=True,
+            timeout=15.0,
+        )
+
+        body_lower = response.text.lower()
+        if "no longer accepting responses" in body_lower:
+            return _json({
+                "status": "form_closed",
+                "message": "The room reservation form is no longer accepting responses.",
+            })
+        if response.status_code not in {200, 302}:
+            return _json({
+                "status": "error",
+                "message": f"Form submission failed with HTTP {response.status_code}.",
+            })
+
+        app = _get_ctx(ctx)
+        tz_key = app.timezone.key if app.timezone else "America/Los_Angeles"
+
+        description_parts = [
+            f"Room type: {room_type}",
+            f"Number of people: {num_people}",
+            f"Booked by: {name} ({email})",
+        ]
+        if phone:
+            description_parts.append(f"Phone: {phone}")
+        if floor_preference:
+            description_parts.append(f"Floor preference: {floor_preference}")
+        if notes:
+            description_parts.append(f"Notes: {notes}")
+
+        location = "USF Downtown Campus"
+        if floor_preference:
+            location = f"USF Downtown Campus, {floor_preference}"
+
+        calendar_event_details = {
+            "summary": f"Room Reservation \u2013 {room_type}",
+            "location": location,
+            "description": "\n".join(description_parts),
+            "start": {"dateTime": dt_start.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": tz_key},
+            "end": {"dateTime": dt_end.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": tz_key},
+        }
+
+        return _json({
+            "status": "submitted",
+            "message": "Room reservation submitted successfully.",
+            "fields": {
+                "name": name,
+                "email": email,
+                "date": date,
+                "start_time": start_time,
+                "end_time": end_time,
+                "num_people": num_people,
+                "room_type": room_type,
+                "phone": phone,
+                "floor_preference": floor_preference,
+                "notes": notes,
+            },
+            "calendar_event_details": calendar_event_details,
+        })
+    except httpx.RequestError as exc:
+        return _json({"status": "error", "message": f"Network error: {exc}"})
+    except Exception as exc:
+        return _json({"status": "error", "message": str(exc)})
 
 
 def main() -> None:
