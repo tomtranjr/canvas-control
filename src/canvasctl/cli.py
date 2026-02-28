@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Sequence
+from urllib.parse import urlencode
 
 import typer
 from rich.console import Console
@@ -70,6 +71,7 @@ courses_app = typer.Typer(help="List and inspect courses")
 download_app = typer.Typer(help="Download course files")
 grades_app = typer.Typer(help="View course grades")
 assignments_app = typer.Typer(help="Submit assignments")
+rooms_app = typer.Typer(help="Reserve study and meeting rooms")
 
 mcp_app = typer.Typer(help="MCP server commands")
 
@@ -78,6 +80,7 @@ app.add_typer(courses_app, name="courses")
 app.add_typer(download_app, name="download")
 app.add_typer(grades_app, name="grades")
 app.add_typer(assignments_app, name="assignments")
+app.add_typer(rooms_app, name="rooms")
 app.add_typer(mcp_app, name="mcp")
 
 console = Console()
@@ -979,6 +982,121 @@ def mcp_serve() -> None:
     from canvasctl.mcp_server import main as mcp_main
 
     mcp_main()
+
+
+_ROOM_RESERVATION_FORM_URL = (
+    "https://docs.google.com/forms/d/e/"
+    "1FAIpQLSc3VgP92ybtuIe5snk_tw2QQXB8u5VsXDo-CBD_AsRujg6zVw/viewform"
+)
+
+_ROOM_FORM_ENTRY_IDS: dict[str, int] = {
+    "name": 1581876510,
+    "email": 517069695,
+    "phone": 1365170802,
+    "date": 1394121387,
+    "start_time": 714892402,
+    "end_time": 1579380649,
+    "num_people": 1785840432,
+    "room_type": 1694640372,
+    "floor_preference": 844059824,
+    "notes": 784944234,
+}
+
+VALID_ROOM_TYPES = frozenset({
+    "Study Room",
+    "Large Conference Room (1st or 4th floor)",
+    "Classroom",
+})
+
+VALID_FLOOR_PREFERENCES = frozenset({"1st Floor", "4th Floor", "5th Floor"})
+
+
+def _build_room_reservation_url(
+    *,
+    name: str,
+    email: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+    num_people: int,
+    room_type: str,
+    phone: str | None,
+    floor_preference: str | None,
+    notes: str | None,
+) -> str:
+    params: dict[str, str] = {
+        f"entry.{_ROOM_FORM_ENTRY_IDS['name']}": name,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['email']}": email,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['date']}": date,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['start_time']}": start_time,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['end_time']}": end_time,
+        f"entry.{_ROOM_FORM_ENTRY_IDS['num_people']}": str(num_people),
+        f"entry.{_ROOM_FORM_ENTRY_IDS['room_type']}": room_type,
+    }
+    if phone:
+        params[f"entry.{_ROOM_FORM_ENTRY_IDS['phone']}"] = phone
+    if floor_preference:
+        params[f"entry.{_ROOM_FORM_ENTRY_IDS['floor_preference']}"] = floor_preference
+    if notes:
+        params[f"entry.{_ROOM_FORM_ENTRY_IDS['notes']}"] = notes
+    return f"{_ROOM_RESERVATION_FORM_URL}?{urlencode(params)}"
+
+
+@rooms_app.command("reserve")
+def rooms_reserve(
+    name: str = typer.Option(..., "--name", "-n", help="First and last name (family name required)."),
+    email: str = typer.Option(..., "--email", "-e", help="USF email address (xxxxx@dons.usfca.edu)."),
+    date: str = typer.Option(..., "--date", "-d", help="Date of reservation in MM/DD/YYYY format."),
+    start_time: str = typer.Option(..., "--start-time", help="Start time (e.g. '10:00 AM')."),
+    end_time: str = typer.Option(..., "--end-time", help="End time (e.g. '12:00 PM')."),
+    num_people: int = typer.Option(..., "--people", "-p", help="Number of people."),
+    room_type: str = typer.Option(
+        ..., "--room-type", "-r",
+        help="Room type: 'Study Room', 'Large Conference Room (1st or 4th floor)', or 'Classroom'.",
+    ),
+    phone: str | None = typer.Option(None, "--phone", help="Contact phone number (required for first-time requesters)."),
+    floor_preference: str | None = typer.Option(
+        None, "--floor", "-f",
+        help="Floor preference: '1st Floor', '4th Floor', or '5th Floor'.",
+    ),
+    notes: str | None = typer.Option(None, "--notes", help="Additional questions or notes about the reservation."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Print the URL instead of opening a browser."),
+) -> None:
+    """Reserve a study or meeting room at the USF Downtown Campus.
+
+    Opens a pre-filled Google Form in your browser. Review the fields and
+    click Submit to complete your reservation request.
+    """
+    if room_type not in VALID_ROOM_TYPES:
+        _fail(
+            f"Invalid room type: '{room_type}'. "
+            f"Choose from: {', '.join(sorted(VALID_ROOM_TYPES))}"
+        )
+    if floor_preference is not None and floor_preference not in VALID_FLOOR_PREFERENCES:
+        _fail(
+            f"Invalid floor preference: '{floor_preference}'. "
+            f"Choose from: {', '.join(sorted(VALID_FLOOR_PREFERENCES))}"
+        )
+
+    url = _build_room_reservation_url(
+        name=name,
+        email=email,
+        date=date,
+        start_time=start_time,
+        end_time=end_time,
+        num_people=num_people,
+        room_type=room_type,
+        phone=phone,
+        floor_preference=floor_preference,
+        notes=notes,
+    )
+
+    if no_browser:
+        console.print(url)
+    else:
+        typer.launch(url)
+        console.print("[green]Opening room reservation form in your browser...[/green]")
+        console.print(f"[dim]{url}[/dim]")
 
 
 def main() -> None:
