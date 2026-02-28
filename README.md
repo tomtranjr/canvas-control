@@ -10,7 +10,7 @@
 
 ## Star History
 
-[Star History Chart](https://www.star-history.com/#tomtranjr/canvas-control&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=tomtranjr/canvas-control&type=date&legend=top-left)](https://www.star-history.com/#tomtranjr/canvas-control&type=date&legend=top-left)
 
 ## Table of contents
 
@@ -41,22 +41,27 @@ uv venv --python 3.12
 source .venv/bin/activate
 ```
 
-1. Install the project and dev dependencies:
+2. Install the project and dev dependencies:
 
 ```bash
 uv pip install -e '.[dev]'
 ```
 
-1. Set your Canvas base URL once:
+3. Set your Canvas base URL once:
 
 ```bash
 cvsctl config set-base-url https://your-school.instructure.com
 ```
 
-1. Set `CANVAS_TOKEN` (see [configuration docs](docs/configuration.md#set-canvas_token)) or let `cvsctl` prompt for it.
-2. Run your first command:
+4. Set `CANVAS_TOKEN` (see [configuration docs](docs/configuration.md#set-canvas_token)) or let `cvsctl` prompt for it.
+
+5. Run the onboarding wizard to configure everything interactively, or jump straight to your first command:
 
 ```bash
+# Guided setup (recommended for first-time users)
+cvsctl onboard
+
+# Or go straight to listing your courses
 cvsctl courses list
 ```
 
@@ -226,19 +231,19 @@ When changes are merged into the main branch, update your local clone and reinst
 git pull origin main
 ```
 
-1. Reinstall the package (picks up new dependencies or entry-point changes):
+2. Reinstall the package (picks up new dependencies or entry-point changes):
 
 ```bash
 uv pip install -e '.[dev]'
 ```
 
-1. Run the test suite to verify nothing is broken:
+3. Run the test suite to verify nothing is broken:
 
 ```bash
 uv run pytest
 ```
 
-1. Restart the MCP server in your AI client so it spawns a fresh process:
+4. Restart the MCP server in your AI client so it spawns a fresh process:
   - **Claude Desktop**: quit and relaunch the app
   - **Cursor**: open Settings → MCP and click the refresh/reconnect button
   - **Claude Code**: the server is spawned per-session; start a new session
@@ -253,7 +258,7 @@ uv run pytest
 uv run pytest
 ```
 
-1. Optional live smoke test (requires real Canvas credentials):
+4. Optional live smoke test (requires real Canvas credentials):
 
 ```bash
 export CANVAS_BASE_URL="https://your-school.instructure.com"
@@ -262,5 +267,5 @@ export CANVAS_TEST_COURSE_ID="12345"
 uv run pytest -m live
 ```
 
-1. Open a PR with what changed, why, and test coverage.
+5. Open a PR with what changed, why, and test coverage.
 
