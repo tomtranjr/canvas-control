@@ -19,6 +19,7 @@ from rich.console import Console
 
 from canvasctl.canvas_api import CanvasClient, CourseSummary
 from canvasctl.config import AppConfig, get_course_path, load_config, set_course_path, set_default_destination
+from canvasctl.course_cache import get_cached_courses, load_cache, write_cache
 from canvasctl.downloader import (
     build_course_slug,
     download_tasks,
@@ -115,7 +116,10 @@ def _localize_dates(
     return obj
 
 
-def _get_active_course_ids(client: CanvasClient) -> list[int]:
+def _get_active_course_ids(client: CanvasClient, base_url: str) -> list[int]:
+    cached = get_cached_courses(base_url)
+    if cached is not None:
+        return [c.id for c in cached]
     courses = client.list_courses(include_all=False)
     return [c.id for c in courses]
 
@@ -245,21 +249,106 @@ def _validate_absolute_file_paths(raw_paths: list[str]) -> tuple[list[Path], str
     return files, None
 
 
+@mcp.resource(
+    "canvasctl://courses",
+    name="course_list",
+    title="Canvas Course List (cached)",
+    description=(
+        "Local cache of enrolled Canvas courses. Read this resource first to find "
+        "course IDs by name before calling any course-specific tool. "
+        "Use refresh_courses_cache to update."
+    ),
+    mime_type="application/json",
+)
+def courses_cache_resource() -> str:
+    """Return the cached course list as JSON.
+
+    Falls back to an empty array with a hint when no cache exists.
+    """
+    try:
+        cfg = load_config()
+    except Exception:
+        cfg = AppConfig()
+    base_url = os.environ.get("CANVAS_BASE_URL", "") or (cfg.base_url or "")
+
+    if not base_url:
+        return _json({"error": "CANVAS_BASE_URL not configured", "courses": []})
+
+    cached = load_cache(base_url)
+    if not cached:
+        return _json({
+            "hint": "No course cache found. Call refresh_courses_cache to populate it.",
+            "courses": [],
+        })
+
+    return _json({
+        "fetched_at": cached.get("fetched_at"),
+        "ttl_seconds": cached.get("ttl_seconds"),
+        "course_count": len(cached.get("courses", [])),
+        "courses": cached.get("courses", []),
+    })
+
+
 @mcp.tool()
-def list_courses(ctx: Context, include_all: bool = False) -> str:
+def list_courses(ctx: Context, include_all: bool = False, force_refresh: bool = False) -> str:
     """List Canvas courses. By default shows only active enrollments.
+
+    Reads from the local course cache when available (use force_refresh=True
+    to bypass). Automatically updates the cache after a live API fetch.
 
     Args:
         include_all: If True, include concluded/past courses too.
+        force_refresh: If True, skip the cache and fetch from Canvas API.
     """
     try:
         app = _get_ctx(ctx)
+
+        # Try cache for active courses (normal case)
+        if not force_refresh and not include_all:
+            cached = get_cached_courses(app.base_url)
+            if cached is not None:
+                items = [asdict(c) for c in cached]
+                if app.timezone:
+                    for item in items:
+                        _localize_dates(item, app.timezone, ("start_at", "end_at"))
+                return _json(items)
+
+        # Live fetch
         courses = app.client.list_courses(include_all=include_all)
+
+        # Opportunistic cache update (only for active courses)
+        if not include_all:
+            try:
+                write_cache(app.base_url, courses)
+            except Exception:
+                pass  # Cache write failure is non-fatal
+
         items = [asdict(c) for c in courses]
         if app.timezone:
             for item in items:
                 _localize_dates(item, app.timezone, ("start_at", "end_at"))
         return _json(items)
+    except Exception as exc:
+        return _json({"error": str(exc)})
+
+
+@mcp.tool()
+def refresh_courses_cache(ctx: Context) -> str:
+    """Force-refresh the local course list cache from Canvas.
+
+    Call this after enrolling in a new course or when the cached list
+    seems stale. Other tools will read from the cache automatically.
+    """
+    try:
+        app = _get_ctx(ctx)
+        courses = app.client.list_courses(include_all=False)
+        path = write_cache(app.base_url, courses)
+        return _json({
+            "refreshed": True,
+            "course_count": len(courses),
+            "cache_path": str(path),
+            "courses": [asdict(c) for c in courses],
+        })
     except Exception as exc:
         return _json({"error": str(exc)})
 
@@ -281,7 +370,7 @@ def get_upcoming_assignments(
         now = datetime.now(UTC)
         cutoff = now + timedelta(days=days_ahead)
 
-        course_ids = [course_id] if course_id else _get_active_course_ids(app.client)
+        course_ids = [course_id] if course_id else _get_active_course_ids(app.client, app.base_url)
         results: list[dict[str, Any]] = []
 
         for cid in course_ids:
@@ -319,7 +408,7 @@ def get_announcements(
     """
     try:
         app = _get_ctx(ctx)
-        course_ids = [course_id] if course_id else _get_active_course_ids(app.client)
+        course_ids = [course_id] if course_id else _get_active_course_ids(app.client, app.base_url)
         if not course_ids:
             return _json([])
 
@@ -791,7 +880,7 @@ def complete_assignment(
     """
     try:
         app = _get_ctx(ctx)
-        course_ids = [course_id] if course_id else _get_active_course_ids(app.client)
+        course_ids = [course_id] if course_id else _get_active_course_ids(app.client, app.base_url)
         if not course_ids:
             return _json(
                 _build_complete_assignment_response(

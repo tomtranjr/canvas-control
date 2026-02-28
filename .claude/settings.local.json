@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRemove platformdirs and tomli-w dependencies, make questionary optional\n\nReplace platformdirs with stdlib os/sys for config directory resolution.\nSwitch config format from TOML to JSON, eliminating both tomli-w and\ntomllib imports in favor of stdlib json. Move questionary from core\ndependencies to an optional [interactive] extra since it is only used\nfor the download interactive command and was already lazy-loaded.\n\nReduces runtime dependencies from 6 to 3 \\(httpx, rich, typer\\).\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(pip show:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)",
+      "Bash(git restore:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(python3:*)",
+      "Bash(git:*)",
+      "Skill(codebase-visualizer)",
+      "Bash(open:*)",
+      "Bash(uv lock:*)",
+      "Bash(python:*)",
+      "Bash(uv pip:*)"
+    ]
+  }
+}

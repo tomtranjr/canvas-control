@@ -322,7 +322,7 @@ def test_step_show_courses_renders_table():
     """Courses table is printed and courses_count is set on result."""
     console = _console()
     result = OnboardResult()
-    courses = _step_show_courses(console, FakeClient(), result)
+    courses = _step_show_courses(console, FakeClient(), result, "https://canvas.test")
 
     assert result.courses_count == 2
     output = _console_out(console)
@@ -335,7 +335,7 @@ def test_step_show_courses_empty_prints_warning():
     """No active courses prints a warning and returns empty list."""
     console = _console()
     result = OnboardResult()
-    courses = _step_show_courses(console, FakeClient(courses=[]), result)
+    courses = _step_show_courses(console, FakeClient(courses=[]), result, "https://canvas.test")
 
     assert courses == []
     assert result.courses_count == 0
@@ -622,7 +622,7 @@ def test_step_show_courses_api_error_returns_empty(monkeypatch):
     result = OnboardResult()
 
     fake = FakeClient(raise_on_first_call=CanvasApiError("timeout"))
-    courses = _step_show_courses(console, fake, result)
+    courses = _step_show_courses(console, fake, result, "https://canvas.test")
 
     assert courses == []
     assert result.courses_count == 0

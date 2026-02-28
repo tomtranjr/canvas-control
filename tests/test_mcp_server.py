@@ -81,7 +81,11 @@ class TestStripHtml:
 
 
 class TestListCourses:
-    def test_returns_courses(self):
+    def test_returns_courses(self, monkeypatch):
+        # Monkeypatch cache to prevent loading stale test data
+        monkeypatch.setattr("canvasctl.mcp_server.get_cached_courses", lambda x: None)
+        monkeypatch.setattr("canvasctl.mcp_server.write_cache", lambda x, y: None)
+
         client = MagicMock()
         client.list_courses.return_value = [
             CourseSummary(
@@ -102,7 +106,10 @@ class TestListCourses:
         assert result[0]["course_code"] == "BIO101"
         client.list_courses.assert_called_once_with(include_all=False)
 
-    def test_error(self):
+    def test_error(self, monkeypatch):
+        # Monkeypatch cache to force API call
+        monkeypatch.setattr("canvasctl.mcp_server.get_cached_courses", lambda x: None)
+
         client = MagicMock()
         client.list_courses.side_effect = RuntimeError("API down")
         ctx = _make_ctx(client)
@@ -113,7 +120,10 @@ class TestListCourses:
 
 
 class TestGetUpcomingAssignments:
-    def test_filters_by_date(self):
+    def test_filters_by_date(self, monkeypatch):
+        # Monkeypatch cache to prevent loading stale test data
+        monkeypatch.setattr("canvasctl.mcp_server.get_cached_courses", lambda x: None)
+
         client = MagicMock()
         client.list_courses.return_value = [
             CourseSummary(
@@ -651,7 +661,10 @@ class TestCompleteAssignment:
         assert result["status"] == "ambiguous"
         assert len(result["candidates"]) == 2
 
-    def test_returns_needs_input_for_submission_assignments(self):
+    def test_returns_needs_input_for_submission_assignments(self, monkeypatch):
+        # Monkeypatch cache to prevent loading stale test data
+        monkeypatch.setattr("canvasctl.mcp_server.get_cached_courses", lambda x: None)
+
         client = MagicMock()
         client.list_courses.return_value = [
             CourseSummary(

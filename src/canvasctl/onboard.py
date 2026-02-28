@@ -80,7 +80,7 @@ def run_onboard(console: Console) -> None:
             client = _step_token_and_verify(console, cfg.base_url, result)
 
             if client is not None:
-                courses = _step_show_courses(console, client, result)
+                courses = _step_show_courses(console, client, result, cfg.base_url)
                 cfg = _step_download_paths(console, cfg, courses, result)
 
         _step_summary(console, result)
@@ -235,7 +235,7 @@ def _step_token_and_verify(
 
 
 def _step_show_courses(
-    console: Console, client: CanvasClient, result: OnboardResult
+    console: Console, client: CanvasClient, result: OnboardResult, base_url: str | None
 ) -> list[CourseSummary]:
     """[3/5] Fetch and display the active courses table."""
     _step_header(console, 3, "Your Courses")
@@ -252,6 +252,14 @@ def _step_show_courses(
         console.print("  [yellow]No active courses found.[/yellow]")
     else:
         console.print(render_courses_table(courses))
+        # Opportunistic cache write after onboard fetches live data
+        if base_url:
+            try:
+                from canvasctl.course_cache import write_cache
+                write_cache(base_url, courses)
+                console.print("  [dim]Course list cached for faster lookups.[/dim]")
+            except Exception:
+                pass  # Cache write failure is non-fatal
     return courses
 
 

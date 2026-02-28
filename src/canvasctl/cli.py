@@ -63,6 +63,7 @@ from canvasctl.sources import (
     warning_to_manifest_item,
     collect_remote_files_for_course,
 )
+from canvasctl.course_cache import cache_info, courses_from_cache, load_cache, write_cache
 
 app = typer.Typer(help="Canvas LMS CLI")
 config_app = typer.Typer(help="Manage local cvsctl config")
@@ -70,6 +71,7 @@ courses_app = typer.Typer(help="List and inspect courses")
 download_app = typer.Typer(help="Download course files")
 grades_app = typer.Typer(help="View course grades")
 assignments_app = typer.Typer(help="Submit assignments")
+cache_app = typer.Typer(help="Manage the local course list cache")
 
 mcp_app = typer.Typer(help="MCP server commands")
 
@@ -78,6 +80,7 @@ app.add_typer(courses_app, name="courses")
 app.add_typer(download_app, name="download")
 app.add_typer(grades_app, name="grades")
 app.add_typer(assignments_app, name="assignments")
+app.add_typer(cache_app, name="cache")
 app.add_typer(mcp_app, name="mcp")
 
 console = Console()
@@ -479,6 +482,12 @@ def courses_list(
 
     def action(client: CanvasClient) -> int:
         courses = sort_courses(client.list_courses(include_all=all_courses))
+        # Opportunistic cache write for active courses
+        if not all_courses:
+            try:
+                write_cache(resolved_base_url, courses)
+            except Exception:
+                pass  # Cache write failure is non-fatal
         if json_output:
             payload = [course_to_dict(course) for course in courses]
             console.print(json.dumps(payload, indent=2))
@@ -971,6 +980,64 @@ def download_interactive(
     exit_code = _run_with_client(resolved_base_url, action)
     if exit_code:
         raise typer.Exit(code=exit_code)
+
+
+@cache_app.command("refresh")
+def cache_refresh(
+    base_url: str | None = typer.Option(None, "--base-url", help="Canvas instance URL override."),
+) -> None:
+    """Fetch current courses from Canvas and update the local cache."""
+    cfg = _load_config_or_fail()
+    resolved_base_url = _resolve_base_url_or_fail(cfg, base_url)
+
+    def action(client: CanvasClient) -> int:
+        courses = sort_courses(client.list_courses(include_all=False))
+        path = write_cache(resolved_base_url, courses)
+        console.print(f"[green]Cached {len(courses)} course(s) to:[/green] {path}")
+        console.print(render_courses_table(courses))
+        return 0
+
+    _run_with_client(resolved_base_url, action)
+
+
+@cache_app.command("show")
+def cache_show(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON output."),
+    base_url: str | None = typer.Option(None, "--base-url", help="Canvas instance URL override."),
+) -> None:
+    """Show the contents of the local course list cache."""
+    cfg = _load_config_or_fail()
+    resolved_base_url = _resolve_base_url_or_fail(cfg, base_url)
+    info = cache_info(resolved_base_url)
+
+    if not info["present"]:
+        console.print("[yellow]No course cache found.[/yellow]")
+        console.print("Run [bold]cvsctl cache refresh[/bold] to populate it.")
+        return
+
+    if json_output:
+        cached = load_cache(resolved_base_url)
+        console.print(json.dumps(cached, indent=2))
+        return
+
+    # Table view
+    table = Table(title="Course Cache Info")
+    table.add_column("Key", style="cyan")
+    table.add_column("Value")
+    table.add_row("path", info["path"])
+    table.add_row("base_url", info["base_url"] or "")
+    table.add_row("fetched_at", info["fetched_at"] or "")
+    ttl_display = str(info["ttl_seconds"]) + "s" if info["ttl_seconds"] else "never expires"
+    table.add_row("ttl", ttl_display)
+    table.add_row("courses", str(info["course_count"]))
+    table.add_row("valid", str(info["valid"]))
+    console.print(table)
+
+    # Also render the course list
+    cached = load_cache(resolved_base_url)
+    cached_courses = courses_from_cache(cached)
+    if cached_courses:
+        console.print(render_courses_table(cached_courses))
 
 
 @mcp_app.command("serve")
