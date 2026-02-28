@@ -20,7 +20,11 @@
       "Bash(open:*)",
       "Bash(uv lock:*)",
       "Bash(python:*)",
-      "Bash(uv pip:*)"
+      "Bash(uv pip:*)",
+      "Bash(echo:*)",
+      "Bash(source:*)",
+      "Bash(rm:*)",
+      "Bash(uv:*)"
     ]
   }
 }
