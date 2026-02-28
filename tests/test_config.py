@@ -26,9 +26,9 @@ def test_load_save_round_trip(tmp_path, monkeypatch):
     assert loaded.default_dest == str(tmp_path / "downloads")
 
 
-def test_destination_path_defaults_to_downloads_under_cwd():
+def test_destination_path_defaults_to_home_downloads():
     cfg = config.AppConfig()
-    assert cfg.destination_path(cwd=Path("/tmp/project")) == Path("/tmp/project/downloads")
+    assert cfg.destination_path() == Path.home() / "Downloads"
 
 
 def test_set_default_destination_persists_resolved_path(tmp_path, monkeypatch):

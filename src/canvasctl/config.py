@@ -24,11 +24,10 @@ class AppConfig:
     default_concurrency: int = DEFAULT_CONCURRENCY
     course_paths: dict[str, str] | None = None
 
-    def destination_path(self, cwd: Path | None = None) -> Path:
+    def destination_path(self) -> Path:
         if self.default_dest:
             return Path(self.default_dest).expanduser()
-        working_dir = cwd if cwd is not None else Path.cwd()
-        return working_dir / "downloads"
+        return Path.home() / "Downloads"
 
 
 def config_dir() -> Path:

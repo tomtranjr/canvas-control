@@ -981,6 +981,18 @@ def mcp_serve() -> None:
     mcp_main()
 
 
+@app.command("onboard")
+def onboard_cmd() -> None:
+    """Interactive setup wizard for new users."""
+    from canvasctl.onboard import run_onboard
+
+    try:
+        run_onboard(console)
+    except (KeyboardInterrupt, EOFError):
+        console.print("\n[yellow]Setup cancelled.[/yellow]")
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     app()
 
