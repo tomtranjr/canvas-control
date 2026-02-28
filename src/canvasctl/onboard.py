@@ -58,7 +58,14 @@ def run_onboard(console: Console) -> None:
         "\nYou can re-run [bold]cvsctl onboard[/bold] at any time to update these settings.\n"
     )
 
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except ConfigError as exc:
+        console.print(
+            f"  [yellow]Warning: existing config has an issue ({exc}). "
+            "Starting with defaults.[/yellow]"
+        )
+        cfg = AppConfig()
     result = OnboardResult()
     client: CanvasClient | None = None
 
@@ -129,6 +136,11 @@ def _step_base_url(console: Console, cfg: AppConfig, result: OnboardResult) -> A
         console.print(f"  [green]✓ Saved:[/green] {cfg.base_url}")
     except ConfigError as exc:
         console.print(f"  [red]Invalid URL: {exc}[/red]")
+    except OSError as exc:
+        console.print(
+            f"  [red]Could not save configuration: {exc}[/red]\n"
+            "  Check that the config directory is writable."
+        )
 
     return cfg
 
@@ -190,16 +202,34 @@ def _step_token_and_verify(
                 if raw is None:
                     raise KeyboardInterrupt
                 token = raw.strip()
+                if not token:
+                    console.print("  [yellow]No token entered — skipping.[/yellow]")
+                    return None
                 result.token_source = "prompt"
             else:
                 console.print("  [yellow]Too many failed attempts — skipping.[/yellow]")
                 return None
         except CanvasApiError as exc:
             client.close()
-            console.print(f"  [red]Cannot reach Canvas ({exc}) — check URL and network.[/red]")
+            if "403" in str(exc):
+                console.print(
+                    f"  [red]Canvas denied the request: {exc}[/red]\n"
+                    "  Your token may lack the required permissions."
+                )
+            else:
+                console.print(
+                    f"  [red]Cannot reach Canvas ({exc}) — check URL and network.[/red]"
+                )
             retry = questionary.confirm("  Retry?", default=False).ask()
             if retry is None or not retry:
                 return None
+            raw = questionary.password("  Canvas API token:").ask()
+            if raw is None:
+                raise KeyboardInterrupt
+            token = raw.strip()
+            if not token:
+                return None
+            result.token_source = "prompt"
 
     return None
 
@@ -209,7 +239,14 @@ def _step_show_courses(
 ) -> list[CourseSummary]:
     """[3/5] Fetch and display the active courses table."""
     _step_header(console, 3, "Your Courses")
-    courses = sort_courses(client.list_courses(include_all=False))
+    try:
+        courses = sort_courses(client.list_courses(include_all=False))
+    except CanvasApiError as exc:
+        console.print(
+            f"  [red]Could not fetch courses: {exc}[/red]\n"
+            "  Check your network connection or try again later."
+        )
+        return []
     result.courses_count = len(courses)
     if not courses:
         console.print("  [yellow]No active courses found.[/yellow]")
@@ -291,6 +328,11 @@ def _configure_single_path(
         console.print(f"  [green]✓ Saved:[/green] {cfg.default_dest}")
     except ConfigError as exc:
         console.print(f"  [red]Invalid path: {exc}[/red]")
+    except OSError as exc:
+        console.print(
+            f"  [red]Could not save configuration: {exc}[/red]\n"
+            "  Check that the config directory is writable."
+        )
     return cfg
 
 
@@ -321,8 +363,6 @@ def _configure_per_course_paths(
     if selected is None:
         raise KeyboardInterrupt
 
-    result.path_strategy = "per_course"
-
     for course in selected:
         slug = build_course_slug(course)
         default_path = str(Path.home() / "Downloads" / slug)
@@ -339,8 +379,9 @@ def _configure_per_course_paths(
         try:
             set_course_path(course.id, path)
             result.per_course_paths[str(course.id)] = path
+            result.path_strategy = "per_course"
             console.print(f"  [green]✓[/green] {label}: {path}")
-        except ConfigError as exc:
+        except (ConfigError, OSError) as exc:
             console.print(f"  [red]Invalid path for {course.name}: {exc}[/red]")
 
     return cfg

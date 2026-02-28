@@ -10,7 +10,7 @@
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=tomtranjr/canvas-control&type=date&legend=top-left)](https://www.star-history.com/#tomtranjr/canvas-control&type=date&legend=top-left)
+[Star History Chart](https://www.star-history.com/#tomtranjr/canvas-control&type=date&legend=top-left)
 
 ## Table of contents
 
@@ -41,21 +41,20 @@ uv venv --python 3.12
 source .venv/bin/activate
 ```
 
-2. Install the project and dev dependencies:
+1. Install the project and dev dependencies:
 
 ```bash
 uv pip install -e '.[dev]'
 ```
 
-3. Set your Canvas base URL once:
+1. Set your Canvas base URL once:
 
 ```bash
 cvsctl config set-base-url https://your-school.instructure.com
 ```
 
-4. Set `CANVAS_TOKEN` (see [configuration docs](docs/configuration.md#set-canvas_token)) or let `cvsctl` prompt for it.
-
-5. Run your first command:
+1. Set `CANVAS_TOKEN` (see [configuration docs](docs/configuration.md#set-canvas_token)) or let `cvsctl` prompt for it.
+2. Run your first command:
 
 ```bash
 cvsctl courses list
@@ -67,34 +66,36 @@ cvsctl courses list
 
 ### Available tools
 
-| Tool | Description |
-|------|-------------|
-| `list_courses` | List enrolled courses (active or all) |
-| `get_upcoming_assignments` | Assignments due within a time window |
-| `get_announcements` | Recent course announcements |
-| `get_calendar_events` | Calendar events within a time window |
-| `get_syllabus` | Course syllabus content |
-| `get_grades_summary` | Grade overview across courses |
-| `get_grades_detailed` | Per-assignment grade breakdown |
-| `list_course_files` | List all files in a course (raw) |
-| `search_course_files` | Search files by name, type, or folder — preview before downloading |
-| `download_file` | Download a single file by ID |
-| `download_selected_files` | Download a batch of specific files to a local directory |
-| `set_download_path` | Save a download path to config (global or per-course) |
-| `complete_assignment` | Mark assignment complete (submission or module completion flow) |
-| `sync_course_files` | Sync all course files to local disk; supports custom `destination` |
+
+| Tool                       | Description                                                        |
+| -------------------------- | ------------------------------------------------------------------ |
+| `list_courses`             | List enrolled courses (active or all)                              |
+| `get_upcoming_assignments` | Assignments due within a time window                               |
+| `get_announcements`        | Recent course announcements                                        |
+| `get_calendar_events`      | Calendar events within a time window                               |
+| `get_syllabus`             | Course syllabus content                                            |
+| `get_grades_summary`       | Grade overview across courses                                      |
+| `get_grades_detailed`      | Per-assignment grade breakdown                                     |
+| `list_course_files`        | List all files in a course (raw)                                   |
+| `search_course_files`      | Search files by name, type, or folder — preview before downloading |
+| `download_file`            | Download a single file by ID                                       |
+| `download_selected_files`  | Download a batch of specific files to a local directory            |
+| `set_download_path`        | Save a download path to config (global or per-course)              |
+| `complete_assignment`      | Mark assignment complete (submission or module completion flow)    |
+| `sync_course_files`        | Sync all course files to local disk; supports custom `destination` |
+
 
 ### Natural language file downloads
 
 Three new tools enable a conversational download workflow directly from Claude Desktop or Cursor:
 
-**`search_course_files`** — search before you download. Filter by name substring, file extension, or folder path. The assistant shows you a preview of matching files so you can confirm before anything hits disk.
+`**search_course_files**` — search before you download. Filter by name substring, file extension, or folder path. The assistant shows you a preview of matching files so you can confirm before anything hits disk.
 
-**`download_selected_files`** — download a batch of specific files (by Canvas file ID) to any local directory. Skips files that already exist, so it's safe to re-run. Returns a per-file status: `downloaded`, `skipped`, or `failed`.
+`**download_selected_files**` — download a batch of specific files (by Canvas file ID) to any local directory. Skips files that already exist, so it's safe to re-run. Returns a per-file status: `downloaded`, `skipped`, or `failed`.
 
-**`set_download_path`** — persist a directory path to config so you don't have to specify it every time. Set a global default or a per-course path.
+`**set_download_path**` — persist a directory path to config so you don't have to specify it every time. Set a global default or a per-course path.
 
-**`sync_course_files`** — now accepts an optional `destination` parameter, so you can tell the assistant exactly where to put everything without touching config first.
+`**sync_course_files**` — now accepts an optional `destination` parameter, so you can tell the assistant exactly where to put everything without touching config first.
 
 Example conversation:
 
@@ -225,22 +226,22 @@ When changes are merged into the main branch, update your local clone and reinst
 git pull origin main
 ```
 
-2. Reinstall the package (picks up new dependencies or entry-point changes):
+1. Reinstall the package (picks up new dependencies or entry-point changes):
 
 ```bash
 uv pip install -e '.[dev]'
 ```
 
-3. Run the test suite to verify nothing is broken:
+1. Run the test suite to verify nothing is broken:
 
 ```bash
 uv run pytest
 ```
 
-4. Restart the MCP server in your AI client so it spawns a fresh process:
-   - **Claude Desktop**: quit and relaunch the app
-   - **Cursor**: open Settings → MCP and click the refresh/reconnect button
-   - **Claude Code**: the server is spawned per-session; start a new session
+1. Restart the MCP server in your AI client so it spawns a fresh process:
+  - **Claude Desktop**: quit and relaunch the app
+  - **Cursor**: open Settings → MCP and click the refresh/reconnect button
+  - **Claude Code**: the server is spawned per-session; start a new session
 
 ## Contributing
 
@@ -252,7 +253,7 @@ uv run pytest
 uv run pytest
 ```
 
-4. Optional live smoke test (requires real Canvas credentials):
+1. Optional live smoke test (requires real Canvas credentials):
 
 ```bash
 export CANVAS_BASE_URL="https://your-school.instructure.com"
@@ -261,4 +262,5 @@ export CANVAS_TEST_COURSE_ID="12345"
 uv run pytest -m live
 ```
 
-5. Open a PR with what changed, why, and test coverage.
+1. Open a PR with what changed, why, and test coverage.
+

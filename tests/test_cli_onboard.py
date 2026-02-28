@@ -6,7 +6,7 @@ from pathlib import Path
 from rich.console import Console
 from typer.testing import CliRunner
 
-from canvasctl.canvas_api import CanvasUnauthorizedError, CourseSummary
+from canvasctl.canvas_api import CanvasApiError, CanvasUnauthorizedError, CourseSummary
 from canvasctl.cli import app
 from canvasctl.config import AppConfig
 from canvasctl.onboard import (
@@ -534,3 +534,124 @@ def test_run_onboard_env_token_default_paths_succeeds(monkeypatch):
 
     run_onboard(_console())  # should not raise
     assert fake.closed
+
+
+# ---------------------------------------------------------------------------
+# New tests for PR #21 review findings
+# ---------------------------------------------------------------------------
+
+
+def test_onboard_eoferror_exits_cleanly(monkeypatch):
+    """EOFError inside run_onboard prints 'cancelled' and exits with code 1."""
+
+    def raise_eof(_console):
+        raise EOFError
+
+    monkeypatch.setattr("canvasctl.onboard.run_onboard", raise_eof)
+    result = CliRunner().invoke(app, ["onboard"])
+    assert result.exit_code == 1
+    assert "cancelled" in result.output.lower()
+
+
+def test_step_token_401_all_retries_exhausted(monkeypatch):
+    """3 consecutive 401s exhaust all retries and return None."""
+    monkeypatch.delenv("CANVAS_TOKEN", raising=False)
+
+    call_count = [0]
+
+    class _Always401:
+        def list_courses(self, *, include_all: bool = False):
+            call_count[0] += 1
+            raise CanvasUnauthorizedError("bad")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("canvasctl.onboard.CanvasClient", lambda *_a, **_kw: _Always401())
+    # t1 → 401, retry=True, t2 → 401, retry=True, t3 → 401 (3rd attempt, no more retries)
+    fq = FakeQuestionary("t1", True, "t2", True, "t3")
+    monkeypatch.setattr("canvasctl.onboard._load_questionary", lambda: fq)
+
+    console = _console()
+    client = _step_token_and_verify(console, "https://canvas.test", OnboardResult())
+
+    assert client is None
+    assert "too many failed attempts" in _console_out(console).lower()
+
+
+def test_step_token_canvas_api_error_retry_succeeds(monkeypatch):
+    """First CanvasClient raises CanvasApiError; retry with new token succeeds."""
+    monkeypatch.delenv("CANVAS_TOKEN", raising=False)
+
+    call_count = [0]
+
+    class _RetryClient:
+        def list_courses(self, *, include_all: bool = False):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise CanvasApiError("timeout")
+            return SAMPLE_COURSES
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("canvasctl.onboard.CanvasClient", lambda *_a, **_kw: _RetryClient())
+    # enter token, api error → retry=True, enter new token
+    fq = FakeQuestionary("bad-token", True, "good-token")
+    monkeypatch.setattr("canvasctl.onboard._load_questionary", lambda: fq)
+
+    client = _step_token_and_verify(_console(), "https://canvas.test", OnboardResult())
+    assert client is not None
+
+
+def test_step_token_canvas_api_error_no_retry(monkeypatch):
+    """CanvasApiError on first attempt, user declines retry: returns None."""
+    monkeypatch.delenv("CANVAS_TOKEN", raising=False)
+    fake = FakeClient(raise_on_first_call=CanvasApiError("timeout"))
+    monkeypatch.setattr("canvasctl.onboard.CanvasClient", lambda *_a, **_kw: fake)
+    fq = FakeQuestionary("bad-token", False)  # enter token, decline retry
+    monkeypatch.setattr("canvasctl.onboard._load_questionary", lambda: fq)
+
+    client = _step_token_and_verify(_console(), "https://canvas.test", OnboardResult())
+    assert client is None
+
+
+def test_step_show_courses_api_error_returns_empty(monkeypatch):
+    """API error in _step_show_courses returns [] and prints error message."""
+    console = _console()
+    result = OnboardResult()
+
+    fake = FakeClient(raise_on_first_call=CanvasApiError("timeout"))
+    courses = _step_show_courses(console, fake, result)
+
+    assert courses == []
+    assert result.courses_count == 0
+    assert "could not fetch" in _console_out(console).lower()
+
+
+def test_run_onboard_corrupt_config_falls_back_to_defaults(monkeypatch):
+    """Corrupt config (ConfigError from load_config) is caught; onboard continues with defaults."""
+    from canvasctl.config import ConfigError
+
+    def _raise_config_error():
+        raise ConfigError("bad toml")
+
+    monkeypatch.setattr("canvasctl.onboard.load_config", _raise_config_error)
+    fq = FakeQuestionary("")  # empty URL → skip downstream steps
+    monkeypatch.setattr("canvasctl.onboard._load_questionary", lambda: fq)
+
+    console = _console()
+    run_onboard(console)  # must not raise
+    assert "starting with defaults" in _console_out(console).lower()
+
+
+def test_step_token_empty_retry_token_returns_none(monkeypatch):
+    """Token fails 401 once; user says retry=True but enters blank password → returns None."""
+    monkeypatch.delenv("CANVAS_TOKEN", raising=False)
+    fake = FakeClient(raise_on_first_call=CanvasUnauthorizedError("bad"))
+    monkeypatch.setattr("canvasctl.onboard.CanvasClient", lambda *_a, **_kw: fake)
+    fq = FakeQuestionary("bad-token", True, "")  # enter token, retry yes, blank
+    monkeypatch.setattr("canvasctl.onboard._load_questionary", lambda: fq)
+
+    client = _step_token_and_verify(_console(), "https://canvas.test", OnboardResult())
+    assert client is None

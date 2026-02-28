@@ -24,7 +24,7 @@ class AppConfig:
     default_concurrency: int = DEFAULT_CONCURRENCY
     course_paths: dict[str, str] | None = None
 
-    def destination_path(self, cwd: Path | None = None) -> Path:
+    def destination_path(self) -> Path:
         if self.default_dest:
             return Path(self.default_dest).expanduser()
         return Path.home() / "Downloads"
