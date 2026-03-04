@@ -18,7 +18,13 @@ from mcp.server.fastmcp import Context, FastMCP
 from rich.console import Console
 
 from canvasctl.canvas_api import CanvasClient, CourseSummary
-from canvasctl.config import AppConfig, get_course_path, load_config, set_course_path, set_default_destination
+from canvasctl.config import (
+    AppConfig,
+    get_course_path,
+    load_config,
+    set_course_path,
+    set_default_destination,
+)
 from canvasctl.downloader import (
     build_course_slug,
     download_tasks,
@@ -33,7 +39,11 @@ from canvasctl.manifest import (
     write_course_manifest,
     write_manifest,
 )
-from canvasctl.sources import collect_remote_files_for_course, normalize_sources, warning_to_manifest_item
+from canvasctl.sources import (
+    collect_remote_files_for_course,
+    normalize_sources,
+    warning_to_manifest_item,
+)
 
 
 @dataclass

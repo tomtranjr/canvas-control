@@ -98,8 +98,9 @@ def test_render_grades_summary_table_na_for_none():
     grade = _make_course_grade(current_score=None, current_grade=None)
     table = render_grades_summary_table([grade])
     # Render the table to check N/A appears
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
 
     output = StringIO()
     console = Console(file=output, width=120)
@@ -113,8 +114,9 @@ def test_render_detailed_grades_table_includes_overall():
     assignments = [_make_assignment_grade()]
     table = render_detailed_grades_table(course_grade, assignments)
 
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
 
     output = StringIO()
     console = Console(file=output, width=120)
@@ -133,8 +135,9 @@ def test_render_detailed_grades_table_shows_assignments():
     ]
     table = render_detailed_grades_table(course_grade, assignments)
 
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
 
     output = StringIO()
     console = Console(file=output, width=120)

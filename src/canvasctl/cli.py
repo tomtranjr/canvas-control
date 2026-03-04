@@ -18,12 +18,11 @@ from canvasctl.canvas_api import (
     CourseSummary,
 )
 from canvasctl.config import (
+    DEFAULT_CONCURRENCY,
     AppConfig,
     ConfigError,
-    DEFAULT_CONCURRENCY,
     clear_course_path,
     clear_default_destination,
-    get_course_path,
     load_config,
     resolve_base_url,
     set_base_url,
@@ -31,6 +30,13 @@ from canvasctl.config import (
     set_default_destination,
 )
 from canvasctl.courses import course_to_dict, render_courses_table, sort_courses
+from canvasctl.downloader import (
+    build_course_slug,
+    download_tasks,
+    plan_course_download_tasks,
+    result_to_manifest_item,
+    summarize_results,
+)
 from canvasctl.grades import (
     _default_export_dir,
     assignment_grade_to_dict,
@@ -42,13 +48,6 @@ from canvasctl.grades import (
     sort_assignment_grades,
     sort_grades,
 )
-from canvasctl.downloader import (
-    build_course_slug,
-    download_tasks,
-    plan_course_download_tasks,
-    result_to_manifest_item,
-    summarize_results,
-)
 from canvasctl.interactive import prompt_interactive_selection
 from canvasctl.manifest import (
     course_manifest_path,
@@ -59,9 +58,9 @@ from canvasctl.manifest import (
 )
 from canvasctl.sources import (
     ALL_SOURCES,
+    collect_remote_files_for_course,
     normalize_sources,
     warning_to_manifest_item,
-    collect_remote_files_for_course,
 )
 
 app = typer.Typer(help="Canvas LMS CLI")

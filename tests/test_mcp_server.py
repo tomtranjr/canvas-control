@@ -7,12 +7,9 @@ CanvasClient inside the context so no real HTTP calls are made.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
-
-import pytest
 
 from canvasctl.canvas_api import (
     Announcement,
@@ -26,7 +23,6 @@ from canvasctl.config import AppConfig
 from canvasctl.mcp_server import (
     AppContext,
     _convert_tz,
-    _find_course,
     _localize_dates,
     _strip_html,
     complete_assignment,
