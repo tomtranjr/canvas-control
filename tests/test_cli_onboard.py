@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 from rich.console import Console
 from typer.testing import CliRunner

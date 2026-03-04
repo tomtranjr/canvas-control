@@ -8,7 +8,12 @@ from typing import Any, Literal
 from rich.console import Console
 from rich.table import Table
 
-from canvasctl.canvas_api import CanvasApiError, CanvasClient, CanvasUnauthorizedError, CourseSummary
+from canvasctl.canvas_api import (
+    CanvasApiError,
+    CanvasClient,
+    CanvasUnauthorizedError,
+    CourseSummary,
+)
 from canvasctl.config import (
     AppConfig,
     ConfigError,

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import platformdirs
-import tomllib
 import tomli_w
 
 APP_NAME = "canvas-control"

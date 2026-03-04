@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from canvasctl.canvas_api import CanvasApiError
-from canvasctl.sources import collect_remote_files_for_course, extract_file_ids_from_payload, extract_file_ids_from_text
+from canvasctl.sources import (
+    collect_remote_files_for_course,
+    extract_file_ids_from_payload,
+    extract_file_ids_from_text,
+)
 
 
 class FakeCanvasClient:
