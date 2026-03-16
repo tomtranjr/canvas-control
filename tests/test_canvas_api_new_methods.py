@@ -244,7 +244,7 @@ def test_list_announcements_pagination(monkeypatch):
     assert announcements[1].id == 11
 
 
-def test_list_course_modules_with_items(monkeypatch):
+def test_list_modules(monkeypatch):
     monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
 
     with respx.mock(assert_all_called=True) as router:
@@ -254,7 +254,7 @@ def test_list_course_modules_with_items(monkeypatch):
         )
 
         with CanvasClient("https://canvas.test", "token") as client:
-            modules = client.list_course_modules_with_items(100)
+            modules = client.list_modules(100)
 
     assert modules[0]["id"] == 1
     assert modules[0]["name"] == "Week 1"

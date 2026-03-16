@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -288,8 +287,3 @@ def warning_to_manifest_item(
         "status": "unresolved",
         "error": warning.detail,
     }
-
-
-def debug_dump_extraction(payload: Any) -> str:
-    file_ids = sorted(extract_file_ids_from_payload(payload))
-    return json.dumps({"file_ids": file_ids}, indent=2)

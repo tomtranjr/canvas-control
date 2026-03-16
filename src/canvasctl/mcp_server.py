@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
@@ -20,6 +21,7 @@ from rich.console import Console
 from canvasctl.canvas_api import CanvasClient, CourseSummary
 from canvasctl.config import (
     AppConfig,
+    ConfigError,
     get_course_path,
     load_config,
     set_course_path,
@@ -45,6 +47,16 @@ from canvasctl.sources import (
     warning_to_manifest_item,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _safe_error(exc: Exception) -> str:
+    """Return a user-safe error string, logging the full exception."""
+    if isinstance(exc, (RuntimeError, ValueError)):
+        return str(exc)
+    logger.exception("Unexpected error in MCP tool")
+    return "An internal error occurred. Check server logs for details."
+
 
 @dataclass
 class AppContext:
@@ -65,7 +77,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 
     try:
         cfg = load_config()
-    except Exception:
+    except (ConfigError, FileNotFoundError, OSError):
         cfg = AppConfig()
 
     base_url = os.environ.get("CANVAS_BASE_URL", "") or (cfg.base_url or "")
@@ -226,7 +238,7 @@ def _resolve_module_item_for_assignment(
     course_id: int,
     assignment_id: int,
 ) -> tuple[int, int] | None:
-    modules = client.list_course_modules_with_items(course_id)
+    modules = client.list_modules(course_id)
     for module in modules:
         module_id = module.get("id")
         items = module.get("items") or []
@@ -271,7 +283,7 @@ def list_courses(ctx: Context, include_all: bool = False) -> str:
                 _localize_dates(item, app.timezone, ("start_at", "end_at"))
         return _json(items)
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -312,7 +324,7 @@ def get_upcoming_assignments(
         results.sort(key=lambda x: x.get("due_at") or "")
         return _json(results)
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -340,7 +352,7 @@ def get_announcements(
                 _localize_dates(item, app.timezone, ("posted_at",))
         return _json(items)
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -377,7 +389,7 @@ def get_calendar_events(
                 _localize_dates(item, app.timezone, ("start_at", "end_at"))
         return _json(items)
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -399,7 +411,7 @@ def get_syllabus(ctx: Context, course_id: int) -> str:
         }
         return _json(result)
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -416,7 +428,7 @@ def get_grades_summary(ctx: Context, course_id: int | None = None) -> str:
             grades = [g for g in grades if g.course_id == course_id]
         return _json([asdict(g) for g in grades])
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -435,7 +447,7 @@ def get_grades_detailed(ctx: Context, course_id: int) -> str:
                 _localize_dates(item, app.timezone, ("submitted_at",))
         return _json(items)
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -450,7 +462,7 @@ def list_course_files(ctx: Context, course_id: int) -> str:
         files = app.client.list_course_files(course_id)
         return _json(files)
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -487,7 +499,7 @@ def download_file(
             "sha256": sha256,
         })
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -548,7 +560,7 @@ def search_course_files(
 
         return _json({"total_count": len(results), "files": results})
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -629,7 +641,7 @@ def download_selected_files(
             "files": downloaded + skipped + failed,
         })
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -660,7 +672,7 @@ def set_download_path(
             "scope": scope,
         })
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 def _find_course(client: CanvasClient, course_id: int) -> CourseSummary | None:
@@ -780,7 +792,7 @@ def sync_course_files(
             "force": force,
         })
     except Exception as exc:
-        return _json({"error": str(exc)})
+        return _json({"error": _safe_error(exc)})
 
 
 @mcp.tool()
@@ -1085,7 +1097,7 @@ def complete_assignment(
                 assignment_id=assignment_id,
                 assignment_name=assignment_name,
                 url=None,
-                next_step=str(exc),
+                next_step=_safe_error(exc),
             )
         )
 
