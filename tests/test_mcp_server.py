@@ -717,7 +717,7 @@ class TestCompleteAssignment:
                 "html_url": "https://canvas.test/courses/100/assignments/10",
             }
         ]
-        client.list_course_modules_with_items.return_value = [
+        client.list_modules.return_value = [
             {
                 "id": 5,
                 "items": [{"id": 55, "type": "Assignment", "content_id": 10}],
@@ -744,7 +744,7 @@ class TestCompleteAssignment:
                 "html_url": "https://canvas.test/courses/100/assignments/10",
             }
         ]
-        client.list_course_modules_with_items.return_value = []
+        client.list_modules.return_value = []
         ctx = _make_ctx(client)
 
         result = json.loads(complete_assignment(ctx, assignment_name="Paper", course_id=100))

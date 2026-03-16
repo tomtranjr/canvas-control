@@ -17,6 +17,10 @@ _NEXT_LINK_RE = re.compile(r"<([^>]+)>;\s*rel=\"next\"")
 class CanvasApiError(RuntimeError):
     """Raised when Canvas returns a non-retryable API failure."""
 
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        super().__init__(message)
+        self.detail = detail
+
 
 class CanvasUnauthorizedError(CanvasApiError):
     """Raised for 401 responses."""
@@ -132,6 +136,7 @@ class CanvasClient:
             timeout=timeout,
             headers={"Authorization": f"Bearer {token}"},
             follow_redirects=True,
+            verify=True,
         )
 
     def close(self) -> None:
@@ -144,17 +149,14 @@ class CanvasClient:
         self.close()
 
     def _sleep_for_retry(self, attempt: int, response: httpx.Response | None = None) -> None:
+        base_delay = 0.5 * (2**attempt)
         if response is not None:
             retry_after = response.headers.get("retry-after")
             if retry_after:
                 try:
                     base_delay = float(retry_after)
                 except ValueError:
-                    base_delay = 0.5 * (2**attempt)
-            else:
-                base_delay = 0.5 * (2**attempt)
-        else:
-            base_delay = 0.5 * (2**attempt)
+                    pass
         jitter = random.uniform(0, 0.25 * base_delay)
         time.sleep(base_delay + jitter)
 
@@ -192,17 +194,17 @@ class CanvasClient:
 
             if response.status_code in RETRYABLE_STATUS_CODES:
                 if attempt >= self.max_retries:
-                    snippet = response.text[:200].strip()
                     raise CanvasApiError(
-                        f"Canvas request failed after retries ({response.status_code}): {snippet}"
+                        f"Canvas request failed after retries ({response.status_code})",
+                        detail=response.text[:200].strip(),
                     )
                 self._sleep_for_retry(attempt, response)
                 continue
 
             if response.status_code >= 400:
-                snippet = response.text[:200].strip()
                 raise CanvasApiError(
-                    f"Canvas request failed ({response.status_code}) for {target}: {snippet}"
+                    f"Canvas request failed ({response.status_code}) for {target}",
+                    detail=response.text[:200].strip(),
                 )
 
             return response
@@ -478,9 +480,6 @@ class CanvasClient:
             f"/courses/{course_id}/modules",
             params={"per_page": 100, "include[]": ["items"]},
         )
-
-    def list_course_modules_with_items(self, course_id: int) -> list[dict[str, Any]]:
-        return self.list_modules(course_id)
 
     def mark_module_item_done(
         self,

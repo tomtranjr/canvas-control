@@ -126,7 +126,9 @@ def save_config(config: AppConfig) -> None:
         payload["default_dest"] = config.default_dest
     if config.course_paths:
         payload["course_paths"] = config.course_paths
-    config_path().write_text(tomli_w.dumps(payload), encoding="utf-8")
+    cfg_file = config_path()
+    cfg_file.write_text(tomli_w.dumps(payload), encoding="utf-8")
+    cfg_file.chmod(0o600)
 
 
 def set_base_url(url: str) -> AppConfig:
