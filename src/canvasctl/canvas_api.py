@@ -478,7 +478,13 @@ class CanvasClient:
     def list_modules(self, course_id: int) -> list[dict[str, Any]]:
         return self.get_paginated(
             f"/courses/{course_id}/modules",
-            params={"per_page": 100, "include[]": ["items"]},
+            params={"per_page": 100},
+        )
+
+    def list_module_items(self, course_id: int, module_id: int) -> list[dict[str, Any]]:
+        return self.get_paginated(
+            f"/courses/{course_id}/modules/{module_id}/items",
+            params={"per_page": 100},
         )
 
     def mark_module_item_done(
