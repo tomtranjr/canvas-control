@@ -76,7 +76,11 @@ def extract_file_ids_from_payload(payload: Any) -> set[int]:
                         if maybe_id is not None:
                             file_ids.add(maybe_id)
             for key, value in node.items():
-                if key in {"file_id", "attachment_id", "content_id"}:
+                if key in {"file_id", "attachment_id"}:
+                    maybe_id = _coerce_int(value)
+                    if maybe_id is not None:
+                        file_ids.add(maybe_id)
+                if key == "content_id" and node.get("type") == "File":
                     maybe_id = _coerce_int(value)
                     if maybe_id is not None:
                         file_ids.add(maybe_id)
@@ -156,7 +160,15 @@ def _collect_source_items(client: CanvasClient, course_id: int, source_type: str
     if source_type == "pages":
         return client.list_pages(course_id)
     if source_type == "modules":
-        return client.list_modules(course_id)
+        modules = client.list_modules(course_id)
+        all_items: list[dict[str, Any]] = []
+        for module in modules:
+            module_id = module.get("id")
+            if module_id is None:
+                continue
+            items = client.list_module_items(course_id, int(module_id))
+            all_items.extend(items)
+        return all_items
     raise ValueError(f"Unsupported source type: {source_type}")
 
 

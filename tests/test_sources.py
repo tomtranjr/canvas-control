@@ -47,6 +47,9 @@ class FakeCanvasClient:
     def list_modules(self, course_id: int) -> list[dict[str, Any]]:
         return []
 
+    def list_module_items(self, course_id: int, module_id: int) -> list[dict[str, Any]]:
+        return []
+
     def get_file(self, file_id: int) -> dict[str, Any]:
         self.file_lookup_called.append(file_id)
         return {
@@ -96,18 +99,26 @@ class RestrictedCanvasClient(FakeCanvasClient):
         raise CanvasApiError("Canvas request failed (404) for courses/1/pages")
 
     def list_modules(self, course_id: int) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": 501,
-                "items": [
-                    {
-                        "id": 601,
-                        "title": "Module file",
-                        "html_url": "https://school.instructure.com/files/33/download",
-                    }
-                ],
-            }
-        ]
+        return [{"id": 501, "name": "Module 1"}]
+
+    def list_module_items(self, course_id: int, module_id: int) -> list[dict[str, Any]]:
+        if module_id == 501:
+            return [
+                {
+                    "id": 601,
+                    "title": "Module file",
+                    "type": "File",
+                    "content_id": 33,
+                    "html_url": "https://school.instructure.com/courses/1/files/33",
+                },
+                {
+                    "id": 602,
+                    "title": "Module page",
+                    "type": "Page",
+                    "content_id": 999,
+                },
+            ]
+        return []
 
 
 def test_collect_remote_files_falls_back_to_modules_when_files_blocked():
@@ -122,6 +133,21 @@ def test_collect_remote_files_falls_back_to_modules_when_files_blocked():
     ids = {item.file_id for item in files}
     assert ids == {33}
     assert client.file_lookup_called == [33]
+    assert 999 not in ids
     warning_messages = [warning.detail for warning in warnings]
     assert any("Skipping files source" in message for message in warning_messages)
     assert any("Skipping pages source" in message for message in warning_messages)
+
+
+def test_extract_file_ids_content_id_requires_file_type():
+    file_item = {"type": "File", "content_id": 50}
+    assert 50 in extract_file_ids_from_payload(file_item)
+
+    page_item = {"type": "Page", "content_id": 60}
+    assert 60 not in extract_file_ids_from_payload(page_item)
+
+    assignment_item = {"type": "Assignment", "content_id": 70}
+    assert 70 not in extract_file_ids_from_payload(assignment_item)
+
+    no_type_item = {"content_id": 80}
+    assert 80 not in extract_file_ids_from_payload(no_type_item)

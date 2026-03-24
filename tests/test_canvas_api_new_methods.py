@@ -250,7 +250,7 @@ def test_list_modules(monkeypatch):
     with respx.mock(assert_all_called=True) as router:
         router.get("https://canvas.test/api/v1/courses/100/modules").respond(
             200,
-            json=[{"id": 1, "name": "Week 1", "items": []}],
+            json=[{"id": 1, "name": "Week 1"}],
         )
 
         with CanvasClient("https://canvas.test", "token") as client:
@@ -258,6 +258,27 @@ def test_list_modules(monkeypatch):
 
     assert modules[0]["id"] == 1
     assert modules[0]["name"] == "Week 1"
+
+
+def test_list_module_items(monkeypatch):
+    monkeypatch.setattr("canvasctl.canvas_api.time.sleep", lambda _: None)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://canvas.test/api/v1/courses/100/modules/5/items").respond(
+            200,
+            json=[
+                {"id": 10, "type": "File", "content_id": 42, "title": "notes.pdf"},
+                {"id": 11, "type": "Page", "content_id": 99, "title": "Intro"},
+            ],
+        )
+
+        with CanvasClient("https://canvas.test", "token") as client:
+            items = client.list_module_items(100, 5)
+
+    assert len(items) == 2
+    assert items[0]["type"] == "File"
+    assert items[0]["content_id"] == 42
+    assert items[1]["type"] == "Page"
 
 
 def test_mark_module_item_done(monkeypatch):
